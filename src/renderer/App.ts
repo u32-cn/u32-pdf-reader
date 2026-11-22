@@ -2,7 +2,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import { Destroyable, react, watch } from '@vtxfp/vtxf-basic-tools-202607/browser'
 import './styles/app.css'
-import { AnnotationStore, createAnnotationId, type AnnotationRecord } from './AnnotationStore'
+import { AnnotationStore, createAnnotationId, DEFAULT_ANNO_STYLE, type AnnotationRecord, type AnnotationStyle, type ShapeKind } from './AnnotationStore'
 import { collectEmbeddedAudios, hasSoundAnnotations, type EmbeddedAudio, type SoundAnnotRef } from './audioExtract'
 import { AudioPlayer } from './AudioPlayer'
 import { EmptyState } from './EmptyState'
@@ -19,6 +19,34 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString()
 
+/** 绘制类工具（拖拽/移动出线的） */
+type DrawTool = Extract<ToolMode, 'ink' | 'shape'>
+
+/** 批注显示开关偏好（跨会话记忆） */
+const PREF_KEY = 'u32pdf.anno-visibility'
+
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(PREF_KEY)
+    if (!raw) return fallback
+    const obj = JSON.parse(raw) as Record<string, unknown>
+    return typeof obj[key] === 'boolean' ? (obj[key] as boolean) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writePref(key: string, value: boolean) {
+  try {
+    const raw = localStorage.getItem(PREF_KEY)
+    const obj = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    obj[key] = value
+    localStorage.setItem(PREF_KEY, JSON.stringify(obj))
+  } catch {
+    /* 存不了就算了，偏好不关键 */
+  }
+}
+
 /**
  * 应用装配与状态编排：只负责「打开文档 / 工具切换 / 批注增删 / 键盘与拖拽」，
  * 页面绘制在 Viewer/PageView，视觉在 TopBar/Sidebar，批注状态在 AnnotationStore。
@@ -32,6 +60,31 @@ export class PdfReaderApp extends Destroyable {
   private _fileName = this.disposeVar(react(''))
   private _tool = this.disposeVar(react<ToolMode>('select'))
   private _annoCount = this.disposeVar(react(0))
+
+  /** 绘制工具状态（顶栏选项条读写，落库时套用） */
+  private _drawColor = this.disposeVar(react<string>(DEFAULT_ANNO_STYLE.color))
+  private _strokeWidth = this.disposeVar(react<number>(DEFAULT_ANNO_STYLE.strokeWidth))
+  private _shapeKind = this.disposeVar(react<ShapeKind>('rect'))
+
+  /** 批注显示开关（跨会话记忆偏好）：pdf=PDF原生外观（图钉/喇叭），chip=衍生播放按钮，mine=手动批注 */
+  private _annoPdfHidden = this.disposeVar(react(readPref('annoPdfHidden', false)))
+  private _annoChipHidden = this.disposeVar(react(readPref('annoChipHidden', false)))
+  private _annoMineHidden = this.disposeVar(react(readPref('annoMineHidden', false)))
+
+  /** 进行中的绘制预览（overlay 放在对应页面的批注层里） */
+  private _drawing: {
+    tool: DrawTool
+    pageView: PageView
+    points: [number, number, number, number][]
+    overlay: SVGSVGElement
+    el: SVGElement
+  } | null = null
+
+  /** 新建文字/便签过程中样式条攒下的样式，保存时随记录落库 */
+  private _pendingStyle: AnnotationStyle = {}
+
+  /** 当前选中的手动批注（便签/文字/手绘/图形）：选中态 + Delete 删除 */
+  private _selectedAnnoId: string | null = null
 
   private _viewer = new Viewer({
     store: this._store,
@@ -50,6 +103,9 @@ export class PdfReaderApp extends Destroyable {
     zoom: this._viewer.zoom,
     tool: this._tool,
     annoCount: this._annoCount,
+    drawColor: this._drawColor,
+    strokeWidth: this._strokeWidth,
+    shapeKind: this._shapeKind,
     onOpen: () => void this.openFile(),
     onToolChange: (tool) => this.setTool(tool),
     onGoToPage: (page) => this.goToPage(page),
@@ -57,6 +113,12 @@ export class PdfReaderApp extends Destroyable {
     onZoomOut: () => this._viewer.zoomOut(),
     onFitWidth: () => this._viewer.fitWidth(),
     onToggleSidebar: () => this.toggleSidebar(),
+    annoPdfHidden: this._annoPdfHidden,
+    annoChipHidden: this._annoChipHidden,
+    annoMineHidden: this._annoMineHidden,
+    onToggleAnnoPdf: () => this.toggleAnnoVisibility('pdf'),
+    onToggleAnnoChip: () => this.toggleAnnoVisibility('chip'),
+    onToggleAnnoMine: () => this.toggleAnnoVisibility('mine'),
   })
 
   private _sidebar = new Sidebar({
@@ -104,6 +166,9 @@ export class PdfReaderApp extends Destroyable {
     root.dataset.tool = 'select'
     root.dataset.sidebar = 'open'
     root.dataset.dragover = 'false'
+    root.dataset.annoPdfHidden = String(this._annoPdfHidden.value)
+    root.dataset.annoChipHidden = String(this._annoChipHidden.value)
+    root.dataset.annoMineHidden = String(this._annoMineHidden.value)
 
     this._viewer.root.appendChild(this._empty.root)
     this._viewer.root.appendChild(this._veil)
@@ -137,6 +202,13 @@ export class PdfReaderApp extends Destroyable {
       if (!target.closest('.note-pop') && !target.closest('.anno-note') && !target.closest('.anno-text')) {
         this._notePop.close()
       }
+      // 点空白处清除手动批注选中态（点在批注/弹窗/播放条上则保留）
+      if (
+        this._selectedAnnoId &&
+        !target.closest('.anno-note, .anno-text, .anno-svg, .note-pop, .pop-player')
+      ) {
+        this._clearSelectedAnno()
+      }
     }
     document.addEventListener('mousedown', onDocMouseDown)
     this.dispose(() => document.removeEventListener('mousedown', onDocMouseDown))
@@ -149,6 +221,34 @@ export class PdfReaderApp extends Destroyable {
     }
     this._viewer.root.addEventListener('mousedown', onViewerMouseDown)
     this.dispose(() => this._viewer.root.removeEventListener('mousedown', onViewerMouseDown))
+
+    // 绘制类工具：mousedown 起笔 → mousemove 预览 → mouseup 落库
+    const onDrawStart = (e: MouseEvent) => {
+      if (e.button !== 0) return
+      const tool = this._tool.value
+      if (tool !== 'ink' && tool !== 'shape') return
+      if ((e.target as HTMLElement).closest('.note-pop, .pop-player, .audio-chip, .sel-toolbar')) return
+      const pageView = this._pageViewFromNode(e.target as Node)
+      if (!pageView) return
+      e.preventDefault()
+      this._beginDraw(tool, pageView, e)
+    }
+    this._viewer.root.addEventListener('mousedown', onDrawStart)
+    this.dispose(() => this._viewer.root.removeEventListener('mousedown', onDrawStart))
+
+    const onDrawMove = (e: MouseEvent) => {
+      if (!this._drawing) return
+      this._extendDraw(e)
+    }
+    window.addEventListener('mousemove', onDrawMove)
+    this.dispose(() => window.removeEventListener('mousemove', onDrawMove))
+
+    const onDrawEnd = (e: MouseEvent) => {
+      if (!this._drawing) return
+      this._endDraw(e)
+    }
+    window.addEventListener('mouseup', onDrawEnd)
+    this.dispose(() => window.removeEventListener('mouseup', onDrawEnd))
 
     const onViewerMouseUp = (e: MouseEvent) => {
       const tool = this._tool.value
@@ -251,6 +351,7 @@ export class PdfReaderApp extends Destroyable {
     const audios = await this.collectAudios(doc, scan)
 
     this._empty.setVisible(false)
+    this._viewer.setPdfAnnotationMode(this._annoPdfHidden.value ? 0 : 1)
     await this._viewer.setDocument(doc, audios)
     this._sidebar.buildThumbs(doc)
   }
@@ -263,7 +364,8 @@ export class PdfReaderApp extends Destroyable {
       const page = await doc.getPage(i)
       const list = await page.getAnnotations()
       for (const a of list) {
-        if (String(a.subtype) !== 'Sound') continue
+        const st = String(a.subtype)
+        if (st !== 'Sound' && st !== 'FileAttachment') continue
         const m = /^(\d+)/.exec(String(a.id ?? ''))
         if (!m) continue
         refs.set(Number(m[1]), {
@@ -280,8 +382,8 @@ export class PdfReaderApp extends Destroyable {
     this._tool.value = tool
     this.root.dataset.tool = tool
     if (tool !== 'select') this._selToolbar.hide()
-    if (tool === 'note' || tool === 'text') {
-      // 放置类工具需要干净页面：清选区、收起播放条
+    if (tool === 'note' || tool === 'text' || tool === 'ink' || tool === 'shape') {
+      // 放置/绘制类工具需要干净页面：清选区、收起播放条
       window.getSelection()?.removeAllRanges()
       this._player.close()
     }
@@ -301,6 +403,19 @@ export class PdfReaderApp extends Destroyable {
       ?.setAttribute('aria-expanded', String(!open))
   }
 
+  /** 批注显示开关：写 root.dataset 驱动 CSS，偏好落 localStorage */
+  toggleAnnoVisibility(group: 'pdf' | 'chip' | 'mine') {
+    const v = group === 'pdf' ? this._annoPdfHidden : group === 'chip' ? this._annoChipHidden : this._annoMineHidden
+    const key = group === 'pdf' ? 'annoPdfHidden' : group === 'chip' ? 'annoChipHidden' : 'annoMineHidden'
+    v.value = !v.value
+    this.root.dataset[key] = String(v.value)
+    writePref(key, v.value)
+    // PDF 组还要控制 canvas 里的注解外观（附件图钉、Sound 喇叭是 pdf.js 画的像素，CSS 管不到）
+    if (group === 'pdf') {
+      this._viewer.setPdfAnnotationMode(v.value ? 0 : 1)
+    }
+  }
+
   /** 用当前选区直接打高亮/下划线（浮条与 H/U 快捷键共用） */
   applySelection(type: 'highlight' | 'underline') {
     const sel = window.getSelection()
@@ -314,7 +429,183 @@ export class PdfReaderApp extends Destroyable {
 
   deleteAnnotation(id: string) {
     this._notePop.close()
+    this._clearSelectedAnno()
     this._store.remove(id)
+  }
+
+  /** 手动批注选中态：给对应 DOM 加 class，换选/关闭时清掉 */
+  private _setSelectedAnno(id: string) {
+    if (this._selectedAnnoId === id) return
+    this._clearSelectedAnno()
+    this._selectedAnnoId = id
+    const el = this._viewer.root.querySelector(`[data-id="${CSS.escape(id)}"]`)
+    el?.classList.add('anno-selected')
+  }
+
+  private _clearSelectedAnno() {
+    if (!this._selectedAnnoId) return
+    const el = this._viewer.root.querySelector(`[data-id="${CSS.escape(this._selectedAnnoId)}"]`)
+    el?.classList.remove('anno-selected')
+    this._selectedAnnoId = null
+  }
+
+  /** 当前工具对应的批注样式 */
+  private _currentDrawStyle(): AnnotationStyle {
+    return { color: this._drawColor.value, strokeWidth: this._strokeWidth.value }
+  }
+
+  /** 起笔：在目标页批注层挂一个预览 SVG */
+  private _beginDraw(tool: DrawTool, pageView: PageView, ev: MouseEvent) {
+    const [x, y] = pageView.annotationLayer.pointOf(ev)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.classList.add('anno-svg')
+    svg.setAttribute('viewBox', '0 0 1000 1000')
+    svg.setAttribute('preserveAspectRatio', 'none')
+    const points: [number, number, number, number][] =
+      tool === 'shape' ? [[x, y, x, y]] : [[x, y, 0, 0]]
+    const el = this._drawElement(svg, tool, points, this._currentDrawStyle())
+    svg.appendChild(el)
+    pageView.annotationLayer.root.appendChild(svg)
+    this._drawing = { tool, pageView, points, overlay: svg, el }
+  }
+
+  /** 预览：追加点 / 更新对角点并重画 */
+  private _extendDraw(ev: MouseEvent) {
+    const d = this._drawing
+    if (!d) return
+    const [x, y] = d.pageView.annotationLayer.pointOf(ev)
+    if (d.tool === 'shape') {
+      d.points[0] = [d.points[0][0], d.points[0][1], x, y]
+    } else {
+      // 采样：距上一点足够远才记录，避免点爆炸
+      const last = d.points[d.points.length - 1]
+      if (Math.hypot(x - last[0], y - last[1]) > 0.004) d.points.push([x, y, 0, 0])
+    }
+    const next = this._drawElement(d.overlay, d.tool, d.points, this._currentDrawStyle())
+    d.el.replaceWith(next)
+    d.el = next
+  }
+
+  /** 收笔：有效笔画入库，无效（单击/近零位移）丢弃 */
+  private _endDraw(ev: MouseEvent) {
+    const d = this._drawing
+    this._drawing = null
+    if (!d) return
+    const [x, y] = d.pageView.annotationLayer.pointOf(ev)
+    let rects = d.points
+    if (d.tool === 'shape') rects = [[d.points[0][0], d.points[0][1], x, y]]
+
+    const span = this._spanOf(rects)
+    const minLen = d.tool === 'shape' ? 0.008 : 0.004
+    if (span < minLen) {
+      d.overlay.remove()
+      return
+    }
+
+    this._store.add({
+      id: createAnnotationId(),
+      type: d.tool,
+      page: d.pageView.pageNum,
+      rects,
+      shape: d.tool === 'shape' ? this._shapeKind.value : undefined,
+      style: this._currentDrawStyle(),
+      createdAt: Date.now(),
+    })
+    // 记录入库触发 repaint 会整体重画，预览 overlay 随 replaceChildren 一并消失
+    d.overlay.remove()
+    this.setTool('select')
+  }
+
+  /** 笔画几何跨度（判定是否有效） */
+  private _spanOf(rects: [number, number, number, number][]): number {
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const [x0, y0, x1, y1] of rects) {
+      minX = Math.min(minX, x0, x1)
+      minY = Math.min(minY, y0, y1)
+      maxX = Math.max(maxX, x0, x1)
+      maxY = Math.max(maxY, y0, y1)
+    }
+    return Math.hypot(maxX - minX, maxY - minY)
+  }
+
+  /** 生成预览用 SVG 元素（与 AnnotationLayer 渲染规则一致） */
+  private _drawElement(
+    svg: SVGSVGElement,
+    tool: DrawTool,
+    points: [number, number, number, number][],
+    style: AnnotationStyle,
+  ): SVGElement {
+    const NS = 'http://www.w3.org/2000/svg'
+    const color = style.color ?? DEFAULT_ANNO_STYLE.color
+    const sw = String(Math.max(style.strokeWidth ?? DEFAULT_ANNO_STYLE.strokeWidth, 1))
+    if (tool === 'ink') {
+      const poly = document.createElementNS(NS, 'polyline')
+      poly.setAttribute('points', points.map(([x, y]) => `${x * 1000},${y * 1000}`).join(' '))
+      poly.setAttribute('fill', 'none')
+      poly.setAttribute('stroke', color)
+      poly.setAttribute('stroke-width', sw)
+      poly.setAttribute('stroke-linecap', 'round')
+      poly.setAttribute('stroke-linejoin', 'round')
+      return poly
+    }
+    const [x0, y0, x1, y1] = points[0] ?? [0, 0, 0, 0]
+    const ax = x0 * 1000
+    const ay = y0 * 1000
+    const bx = x1 * 1000
+    const by = y1 * 1000
+    const kind = this._shapeKind.value
+    let el: SVGElement
+    switch (kind) {
+      case 'ellipse': {
+        el = document.createElementNS(NS, 'ellipse')
+        el.setAttribute('cx', String((ax + bx) / 2))
+        el.setAttribute('cy', String((ay + by) / 2))
+        el.setAttribute('rx', String(Math.abs(bx - ax) / 2))
+        el.setAttribute('ry', String(Math.abs(by - ay) / 2))
+        break
+      }
+      case 'line': {
+        el = document.createElementNS(NS, 'line')
+        el.setAttribute('x1', String(ax))
+        el.setAttribute('y1', String(ay))
+        el.setAttribute('x2', String(bx))
+        el.setAttribute('y2', String(by))
+        break
+      }
+      case 'arrow': {
+        const dx = bx - ax
+        const dy = by - ay
+        const len = Math.hypot(dx, dy) || 1
+        const head = Math.max(Math.min(len * 0.16, 60), 12)
+        const ux = dx / len
+        const uy = dy / len
+        el = document.createElementNS(NS, 'path')
+        el.setAttribute(
+          'd',
+          `M${ax},${ay}L${bx},${by}` +
+            `M${bx - head * ux + head * 0.45 * uy},${by - head * uy - head * 0.45 * ux}` +
+            `L${bx},${by}` +
+            `L${bx - head * ux - head * 0.45 * uy},${by - head * uy + head * 0.45 * ux}`,
+        )
+        break
+      }
+      default: {
+        el = document.createElementNS(NS, 'rect')
+        el.setAttribute('x', String(Math.min(ax, bx)))
+        el.setAttribute('y', String(Math.min(ay, by)))
+        el.setAttribute('width', String(Math.abs(bx - ax)))
+        el.setAttribute('height', String(Math.abs(by - ay)))
+      }
+    }
+    el.setAttribute('fill', 'none')
+    el.setAttribute('stroke', color)
+    el.setAttribute('stroke-width', sw)
+    el.setAttribute('stroke-linecap', 'round')
+    el.setAttribute('stroke-linejoin', 'round')
+    return el
   }
 
   private _beginPlacement(tool: 'note' | 'text', pageView: PageView, ev: MouseEvent) {
@@ -325,6 +616,10 @@ export class PdfReaderApp extends Destroyable {
       initial: '',
       left: ev.clientX - box.left,
       top: ev.clientY - box.top,
+      onStyle: (style) => {
+        // 新建中的实时样式先攒着，保存时随记录落库
+        this._pendingStyle = style
+      },
       onSave: (text) => {
         if (text) {
           this._store.add({
@@ -333,9 +628,11 @@ export class PdfReaderApp extends Destroyable {
             page: pageView.pageNum,
             rects: [[x, y, x, y]],
             text,
+            style: { ...this._pendingStyle },
             createdAt: Date.now(),
           })
         }
+        this._pendingStyle = {}
         // 便签允许连放；文字放完自动回指针，避免误点出一堆空框
         if (tool === 'text') this.setTool('select')
       },
@@ -343,19 +640,36 @@ export class PdfReaderApp extends Destroyable {
   }
 
   private _activateAnnotation(record: AnnotationRecord, pageView: PageView) {
-    if (record.type !== 'note' && record.type !== 'text') return
-    const [x, y] = record.rects[0] ?? [0, 0, 0, 0]
-    const width = pageView.root.clientWidth
-    const height = pageView.root.clientHeight
-    this._notePop.open(pageView.root, {
-      kind: record.type,
-      initial: record.text ?? '',
-      left: x * width + 14,
-      top: y * height + 14,
-      editing: true,
-      onSave: (text) => this._store.setText(record.id, text),
-      onDelete: () => this._store.remove(record.id),
-    })
+    this._setSelectedAnno(record.id)
+    if (record.type === 'note' || record.type === 'text') {
+      const [x, y] = record.rects[0] ?? [0, 0, 0, 0]
+      const width = pageView.root.clientWidth
+      const height = pageView.root.clientHeight
+      this._pendingStyle = { ...record.style }
+      this._notePop.open(pageView.root, {
+        kind: record.type,
+        initial: record.text ?? '',
+        left: x * width + 14,
+        top: y * height + 14,
+        editing: true,
+        style: record.style,
+        onStyle: (style) => {
+          this._pendingStyle = style
+          this._store.updateStyle(record.id, style)
+        },
+        onSave: (text) => {
+          this._store.setText(record.id, text)
+          this._store.updateStyle(record.id, this._pendingStyle)
+          this._pendingStyle = {}
+        },
+        onDelete: () => this._store.remove(record.id),
+      })
+      return
+    }
+    if (record.type === 'ink' || record.type === 'shape') {
+      // 点击已有笔画：换颜色/线宽直接生效（无弹窗）
+      this._store.updateStyle(record.id, this._currentDrawStyle())
+    }
   }
 
   private _activateFromList(record: AnnotationRecord) {
@@ -425,8 +739,14 @@ export class PdfReaderApp extends Destroyable {
     }
 
     if (e.key === 'Escape') {
+      if (this._drawing) {
+        this._drawing.overlay.remove()
+        this._drawing = null
+        return
+      }
       if (this._notePop.isOpen) {
         this._notePop.close()
+        this._clearSelectedAnno()
         return
       }
       if (this._player.isOpen) {
@@ -443,6 +763,13 @@ export class PdfReaderApp extends Destroyable {
 
     if (typing) return
 
+    // Delete/Backspace 删除选中的手动批注
+    if ((e.key === 'Delete' || e.key === 'Backspace') && this._selectedAnnoId) {
+      e.preventDefault()
+      this.deleteAnnotation(this._selectedAnnoId)
+      return
+    }
+
     switch (e.key.toLowerCase()) {
       case 'h':
         this.setTool('highlight')
@@ -455,6 +782,12 @@ export class PdfReaderApp extends Destroyable {
         break
       case 't':
         this.setTool('text')
+        break
+      case 'i':
+        this.setTool('ink')
+        break
+      case 'g':
+        this.setTool('shape')
         break
       case 'v':
         this.setTool('select')

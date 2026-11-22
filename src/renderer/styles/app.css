@@ -143,6 +143,28 @@ body {
   color: var(--faint);
 }
 
+/* 批注显示开关：隐藏态降灰 + 斜线（一眼区分开/关，三个按钮图标本身不同） */
+.icon-btn[data-u32-name="topbar-anno-pdf-toggle"][aria-pressed="true"],
+.icon-btn[data-u32-name="topbar-anno-chip-toggle"][aria-pressed="true"],
+.icon-btn[data-u32-name="topbar-anno-mine-toggle"][aria-pressed="true"] {
+  color: var(--faint);
+  background: var(--hover);
+  position: relative;
+}
+
+.icon-btn[data-u32-name="topbar-anno-pdf-toggle"][aria-pressed="true"]::after,
+.icon-btn[data-u32-name="topbar-anno-chip-toggle"][aria-pressed="true"]::after,
+.icon-btn[data-u32-name="topbar-anno-mine-toggle"][aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 50%;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+
 .btn-primary {
   flex: none;
   height: var(--ctl-h);
@@ -677,6 +699,33 @@ body {
   pointer-events: none;
 }
 
+/* ink / shape 的 SVG 画布层；命中交给 .anno-hit 图形元素 */
+.annotation-layer .anno-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.annotation-layer .anno-svg .anno-hit {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+/* 手动批注选中态：弹窗/激活时有高亮描边，视觉反馈「这条被选中了」 */
+.anno-note.anno-selected,
+.anno-text.anno-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+.annotation-layer .anno-svg .anno-hit.anno-selected {
+  filter: drop-shadow(0 0 2px var(--accent));
+  stroke: var(--accent) !important;
+}
+
 .anno-hl {
   position: absolute;
   background: var(--hl);
@@ -734,6 +783,112 @@ body {
 .anno-text:hover {
   border-color: var(--note-edge);
   box-shadow: 0 2px 6px rgba(60, 50, 30, 0.16);
+}
+
+/* ============================================================
+   绘制工具选项条（工具组下方弹出）
+   ============================================================ */
+
+.tb-center-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.draw-bar {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pop);
+  box-shadow: var(--shadow-pop);
+}
+
+.draw-bar[hidden] {
+  display: none;
+}
+
+.db-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.db-swatch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.db-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.db-width {
+  flex: none;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+
+.db-width i {
+  display: block;
+  background: var(--ink-2);
+  border-radius: 99px;
+}
+
+.db-width:hover {
+  background: var(--hover);
+}
+
+.db-width[aria-pressed="true"] i {
+  background: var(--accent);
+}
+
+.db-shape {
+  flex: none;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+
+.db-shape:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.db-shape[aria-pressed="true"] {
+  background: var(--accent-wash-2);
+  color: var(--accent-ink);
 }
 
 /* 音频图标：默认半透明退让正文，hover/播放时恢复 */
@@ -857,6 +1012,26 @@ body {
   white-space: nowrap;
   color: var(--ink);
   font-size: var(--fs-sm);
+  cursor: grab;
+  user-select: none;
+}
+
+.pop-player.dragging .pop-title {
+  cursor: grabbing;
+}
+
+/* ============================================================
+   批注显示/隐藏总开关（顶栏眼睛按钮 → root.dataset）
+   pdf = PDF 自带（高亮/下划线）；mine = 手动添加（便签/文字/手绘/图形/音频图标）
+   ============================================================ */
+
+.u32pdf[data-anno-pdf-hidden="true"] .anno-hl,
+.u32pdf[data-anno-pdf-hidden="true"] .anno-ul,
+.u32pdf[data-anno-chip-hidden="true"] .audio-chip,
+.u32pdf[data-anno-mine-hidden="true"] .anno-note,
+.u32pdf[data-anno-mine-hidden="true"] .anno-text,
+.u32pdf[data-anno-mine-hidden="true"] .anno-svg {
+  display: none !important;
 }
 
 .play-btn {
@@ -1070,6 +1245,58 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* 样式条：字号 + 调色板两组（放不下自动换行，不溢出弹窗） */
+.note-pop .np-style {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-top: 2px;
+}
+
+.note-pop .np-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.note-pop .np-swatch {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.note-pop .np-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.note-pop .np-size {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+/* 绘制工具光标 */
+.u32pdf[data-tool="ink"] .page-shell,
+.u32pdf[data-tool="shape"] .page-shell {
+  cursor: crosshair;
+}
+
+.u32pdf[data-tool="ink"] .page-shell .textLayer span,
+.u32pdf[data-tool="shape"] .page-shell .textLayer span {
+  cursor: crosshair;
 }
 
 .note-pop .np-hint {

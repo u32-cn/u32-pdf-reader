@@ -57,6 +57,8 @@ export class Viewer extends ViewerBase {
   private _fitScale = 1
   private _lastWidth = 0
   private _rebuildTimer = 0
+  /** pdf.js 注解外观模式（1=画图钉/喇叭外观，0=不画），由 App 的 PDF 注解开关驱动 */
+  private _pdfAnnoMode = 1
 
   /** 近处渲染 */
   private _near = new IntersectionObserver(
@@ -151,8 +153,15 @@ export class Viewer extends ViewerBase {
   async rebuild() {
     const pdf = this._pdf
     if (!pdf) return
-    const prevRatio = this.root.scrollHeight > 0 ? this.root.scrollTop / this.root.scrollHeight : 0
+    // 页锚定：记录视口顶部压住的页面与该页顶部相对视口顶的偏移比例，
+    // 重建后把同一页滚回同一相对位置。文档越长越稳，不会像 scrollHeight
+    // 比例那样在长文档缩放后跳到别的页。
+    const rootTop = this.root.getBoundingClientRect().top
     const prevPage = this.currentPage.value
+    const prevPv = this._pages[prevPage - 1]
+    const anchorRatio = prevPv
+      ? clamp((prevPv.root.getBoundingClientRect().top - rootTop) / Math.max(prevPv.root.getBoundingClientRect().height, 1), -1, 1)
+      : 0
 
     this._near.disconnect()
     this._far.disconnect()
@@ -173,6 +182,7 @@ export class Viewer extends ViewerBase {
         audios: this._audios.filter((a) => a.pageNum === i),
         onAudioChip: (audio, chip) => this._opt.onAudioChip(audio, chip, pv),
         onAnnotationActivate: (rec, ev) => this._opt.onAnnotationActivate(rec, ev, pv),
+        annotationMode: () => this._pdfAnnoMode,
       })
       pv.renderAnnotations(this._opt.store.byPage(i))
       this.inner.appendChild(pv.root)
@@ -181,8 +191,17 @@ export class Viewer extends ViewerBase {
       this._far.observe(pv.root)
     }
 
-    // 尺寸变化后按比例还原滚动位置
-    this.root.scrollTop = prevRatio * this.root.scrollHeight
+    // 尺寸变化后按页锚定还原滚动位置：同一页回到同一相对位置
+    const anchor = this._pages[prevPage - 1] ?? this._pages[0]
+    if (anchor) {
+      const newRootTop = this.root.getBoundingClientRect().top
+      const top =
+        anchor.root.getBoundingClientRect().top - newRootTop + this.root.scrollTop
+      this.root.scrollTop = Math.max(
+        top - anchorRatio * anchor.root.getBoundingClientRect().height,
+        0,
+      )
+    }
     this.currentPage.value = Math.min(prevPage, pdf.numPages)
     this._detectCurrentPage()
     // 首屏不等 IntersectionObserver：立刻画当前页，打开就有内容
@@ -194,6 +213,19 @@ export class Viewer extends ViewerBase {
   /** 批注变化后只重画批注层 */
   repaintAnnotations() {
     for (const pv of this._pages) pv.renderAnnotations(this._opt.store.byPage(pv.pageNum))
+  }
+
+  /**
+   * PDF 注解显隐：0 = 不画注解外观（附件图钉等），否则按 pdf.js AnnotationMode。
+   * 已渲染的页面要释放重画才能抹掉 canvas 里的像素。
+   */
+  setPdfAnnotationMode(mode: number) {
+    this._pdfAnnoMode = mode
+    for (const pv of this._pages) pv.setAnnotationMode(mode)
+    // 只重画已渲染的页；离屏页释放后自然按新模式画
+    for (const pv of this._pages) {
+      if (pv.rendered) void pv.rerender()
+    }
   }
 
   zoomIn() {

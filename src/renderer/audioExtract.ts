@@ -21,6 +21,8 @@ export interface SoundAnnotRef {
 
 /** 音频字节嗅探 MIME */
 function sniffAudioMime(bytes: Uint8Array): string {
+  // ID3v2 头（"ID3"）也是合法 mp3
+  if (bytes.length > 3 && String.fromCharCode(...bytes.slice(0, 3)) === 'ID3') return 'audio/mpeg'
   if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return 'audio/mpeg'
   if (bytes.length > 4 && bytes[0] === 0x52 && bytes[1] === 0x49) return 'audio/wav' // RIFF
   if (bytes.length > 4 && String.fromCharCode(...bytes.slice(0, 4)) === 'OggS') return 'audio/ogg'
@@ -90,25 +92,30 @@ function readRect(dict: string): [number, number, number, number] | null {
 }
 
 /**
- * 廉价预检：文件里有没有 Sound 注解。
- * 逐字节找 ASCII "/Sound"，避免为没有音频的 PDF 白扫一遍对象表。
+ * 廉价预检：文件里有没有 Sound / FileAttachment（内嵌附件音频）注解。
+ * 逐字节找 ASCII "/Sound" 或 "/FileAttachment"，避免为没有音频的 PDF 白扫一遍对象表。
  */
 export function hasSoundAnnotations(data: Uint8Array): boolean {
-  const needle = [0x2f, 0x53, 0x6f, 0x75, 0x6e, 0x64] // "/Sound"
-  const limit = data.length - needle.length
-  outer: for (let i = 0; i <= limit; i++) {
-    if (data[i] !== needle[0]) continue
-    for (let k = 1; k < needle.length; k++) {
-      if (data[i + k] !== needle[k]) continue outer
+  const needles = ['/Sound', '/FileAttachment'].map((s) => Array.from(s, (c) => c.charCodeAt(0)))
+  outer: for (let i = 0; i <= data.length - 4; i++) {
+    for (const needle of needles) {
+      if (i + needle.length > data.length) continue
+      let ok = true
+      for (let k = 0; k < needle.length; k++) {
+        if (data[i + k] !== needle[k]) { ok = false; break }
+      }
+      if (ok) return true
     }
-    return true
   }
   return false
 }
 
 /**
- * 扫描整本 PDF 提取内嵌音频（Sound 注解）。
- * 流程：扫对象 → 找 /Subtype /Sound 注解 → 解析 /Sound 引用 → 提取音频流（FLATE 自动解压）
+ * 扫描整本 PDF 提取内嵌音频。
+ * 支持两种载体：
+ * 1. Sound 注解：/Subtype /Sound → /Sound 引用的音频流
+ * 2. FileAttachment 注解：/Subtype /FileAttachment → /FS 的 /EF /F 附件流（KET 教材这种，内嵌 mp3）
+ * 流程：扫对象 → 找注解 → 提取音频流（FLATE 自动解压）
  * → 页码与矩形由调用方用 pdf.js 注解表（对象号精确对齐）传入。
  */
 export async function collectEmbeddedAudios(
@@ -118,29 +125,40 @@ export async function collectEmbeddedAudios(
   const objects = scanObjects(data)
   const results: EmbeddedAudio[] = []
 
-  const soundAnnots: { num: number; dict: string }[] = []
+  type Cand = { num: number; dict: string }
+  const soundAnnots: Cand[] = []
+  const fileAnnots: Cand[] = []
   for (const obj of objects.values()) {
-    if (/\/Subtype\s*\/Sound\b/.test(obj.dict)) {
-      soundAnnots.push({ num: obj.num, dict: obj.dict })
+    if (/\/Subtype\s*\/Sound\b/.test(obj.dict)) soundAnnots.push({ num: obj.num, dict: obj.dict })
+    else if (/\/Subtype\s*\/FileAttachment\b/.test(obj.dict) && /\/FS\b/.test(obj.dict)) {
+      fileAnnots.push({ num: obj.num, dict: obj.dict })
     }
   }
-  if (soundAnnots.length === 0) return results
 
+  const inflateIfNeeded = async (obj: RawObject): Promise<Uint8Array | null> => {
+    if (!obj.stream) return null
+    let bytes = obj.stream
+    // FLATE 压缩流（/Filter /FlateDecode）：头字节 0x78
+    if (/FlateDecode/.test(obj.dict) || (bytes.length > 2 && bytes[0] === 0x78)) {
+      const inflated = await inflate(bytes)
+      if (!inflated) return null
+      bytes = inflated
+    }
+    return bytes
+  }
+
+  // 1) Sound 注解（原路径）
   for (const annot of soundAnnots) {
     const refM = annot.dict.match(/\/Sound\s+(\d+)\s+0\s+R/)
     if (!refM) continue
     const soundObj = objects.get(Number(refM[1]))
-    if (!soundObj?.stream) continue
+    if (!soundObj) continue
 
     const where = annots.get(annot.num)
     if (!where) continue // pdf.js 没把它归到任何页（不是页面注解），跳过
 
-    let bytes = soundObj.stream
-    // FLATE 压缩流（/Filter /FlateDecode）：头字节 0x78
-    if (/FlateDecode/.test(soundObj.dict) || (bytes.length > 2 && bytes[0] === 0x78)) {
-      const inflated = await inflate(bytes)
-      if (inflated) bytes = inflated
-    }
+    const bytes = await inflateIfNeeded(soundObj)
+    if (!bytes) continue
 
     const titleM = annot.dict.match(/\/T\s*\(([^)]*)\)/)
     results.push({
@@ -148,6 +166,35 @@ export async function collectEmbeddedAudios(
       bytes,
       mime: sniffAudioMime(bytes),
       title: titleM ? titleM[1] : `音频 ${results.length + 1}`,
+      rect: readRect(annot.dict) ?? where.rect,
+    })
+  }
+
+  // 2) FileAttachment 注解（附件路径）：FS → EF → F，附件流通常是压缩的 mp3
+  for (const annot of fileAnnots) {
+    // 只收音频附件，别的附件不展示为音频图标
+    const nameM = annot.dict.match(/\/F\s*\(([^)]*\.mp3)\)/i) || annot.dict.match(/\/UF\s*\(([^)]*\.mp3)\)/i)
+    if (!nameM) continue
+
+    const efM = annot.dict.match(/\/EF\s*<<\s*\/F\s+(\d+)\s+0\s+R/)
+    if (!efM) continue
+    const efObj = objects.get(Number(efM[1]))
+    if (!efObj) continue
+
+    const where = annots.get(annot.num)
+    if (!where) continue
+
+    const bytes = await inflateIfNeeded(efObj)
+    if (!bytes) continue
+    // 双重校验：解出来确实是音频（防误收非音频附件流）
+    if (sniffAudioMime(bytes) === 'audio/mpeg' && !(bytes[0] === 0xff || String.fromCharCode(...bytes.slice(0, 3)) === 'ID3')) continue
+
+    const titleM = annot.dict.match(/\/T\s*\(([^)]*)\)/)
+    results.push({
+      pageNum: where.pageNum,
+      bytes,
+      mime: 'audio/mpeg',
+      title: titleM && titleM[1] ? titleM[1] : nameM[1],
       rect: readRect(annot.dict) ?? where.rect,
     })
   }

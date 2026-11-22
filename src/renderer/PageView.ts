@@ -14,6 +14,8 @@ export interface PageViewOptions {
   audios: EmbeddedAudio[]
   onAudioChip: (audio: EmbeddedAudio, chip: HTMLButtonElement) => void
   onAnnotationActivate: (record: AnnotationRecord, ev: MouseEvent) => void
+  /** pdf.js 注解外观渲染模式（canvas 上画的图钉/外观流），隐藏 PDF 注解时传 0 */
+  annotationMode: () => number
 }
 
 class PageViewBase extends Destroyable {
@@ -72,6 +74,7 @@ export class PageView extends PageViewBase {
   private _rendered = false
   private _rendering = false
   private _token = 0
+  private _annotationMode = 1
 
   get pageNum() {
     return this._opt.pageNum
@@ -83,6 +86,17 @@ export class PageView extends PageViewBase {
 
   renderAnnotations(records: AnnotationRecord[]) {
     this.annotationLayer.render(records)
+  }
+
+  /** 更新 pdf.js 注解外观模式（下次 render 生效；已渲染页配合 rerender 用） */
+  setAnnotationMode(mode: number) {
+    this._annotationMode = mode
+  }
+
+  /** 释放现有位图并按当前状态重画（注解显隐切换时用） */
+  async rerender() {
+    this.release()
+    await this.render()
   }
 
   setCurrent(current: boolean) {
@@ -111,6 +125,8 @@ export class PageView extends PageViewBase {
       canvasContext: canvas.getContext('2d')!,
       viewport,
       transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
+      // PDF 自带注解外观（附件图钉、Sound 喇叭外观流）画不画由开关决定
+      annotationMode: this._opt.annotationMode(),
     })
     this._renderTask = task
 
@@ -160,6 +176,8 @@ export class PageView extends PageViewBase {
     const p2 = vp.convertToViewportPoint(Math.max(ax0, ax1), Math.max(ay0, ay1))
     const cx = (p1[0] + p2[0]) / 2
     const cy = (p1[1] + p2[1]) / 2
+    // 播放按钮往右下错位，避免与 PDF 原生附件图钉（画在 rect 中心）叠在一起
+    const OFFSET = 20
     const maxX = Math.max(vp.width - CHIP_SIZE - 2, 2)
     const maxY = Math.max(vp.height - CHIP_SIZE - 2, 2)
 
@@ -169,8 +187,8 @@ export class PageView extends PageViewBase {
     btn.dataset.u32Name = 'audio-icon'
     btn.setAttribute('aria-pressed', 'false')
     btn.title = audio.title
-    btn.style.left = `${clamp(cx - CHIP_SIZE / 2, 2, maxX)}px`
-    btn.style.top = `${clamp(cy - CHIP_SIZE / 2, 2, maxY)}px`
+    btn.style.left = `${clamp(cx - CHIP_SIZE / 2 + OFFSET, 2, maxX)}px`
+    btn.style.top = `${clamp(cy - CHIP_SIZE / 2 + OFFSET, 2, maxY)}px`
     btn.innerHTML =
       '<span class="ring"></span>' +
       '<svg viewBox="0 0 12 12" width="9" height="9" fill="currentColor" aria-hidden="true">' +

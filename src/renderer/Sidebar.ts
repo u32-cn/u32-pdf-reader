@@ -10,6 +10,8 @@ const TYPE_LABEL: Record<string, string> = {
   underline: '下划线',
   note: '便签',
   text: '文字',
+  ink: '手绘',
+  shape: '图形',
 }
 
 export interface SidebarOptions {

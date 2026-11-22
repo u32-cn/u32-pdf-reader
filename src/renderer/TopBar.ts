@@ -1,8 +1,10 @@
 import { Destroyable, watch } from '@vtxfp/vtxf-basic-tools-202607/browser'
 import type { ReactiveVariable } from '@vtxfp/vtxf-basic-tools-202607/browser'
+import { PALETTE, type ShapeKind } from './AnnotationStore'
 import { icons } from './icons'
 
-export type ToolMode = 'select' | 'highlight' | 'underline' | 'note' | 'text'
+export type ToolMode = 'select' | 'highlight' | 'underline' | 'note' | 'text' | 'ink' | 'shape'
+export type DrawColor = string
 
 export interface TopBarOptions {
   fileName: ReactiveVariable<string>
@@ -18,6 +20,17 @@ export interface TopBarOptions {
   onZoomOut: () => void
   onFitWidth: () => void
   onToggleSidebar: () => void
+  /** 批注显示开关（App 持有状态，顶栏只反映）：pdf=PDF原生外观 / chip=衍生播放按钮 / mine=手动批注 */
+  annoPdfHidden: ReactiveVariable<boolean>
+  annoChipHidden: ReactiveVariable<boolean>
+  annoMineHidden: ReactiveVariable<boolean>
+  onToggleAnnoPdf: () => void
+  onToggleAnnoChip: () => void
+  onToggleAnnoMine: () => void
+  /** 绘制工具状态（App 持有真实状态，顶栏只反映） */
+  drawColor: ReactiveVariable<DrawColor>
+  strokeWidth: ReactiveVariable<number>
+  shapeKind: ReactiveVariable<ShapeKind>
 }
 
 interface ToolSpec {
@@ -34,6 +47,8 @@ const TOOLS: ToolSpec[] = [
   { mode: 'underline', id: 'btn-underline', icon: icons.underline, label: '下划线', hint: '下划线（U）· 选中文字后自动套用' },
   { mode: 'note', id: 'btn-note', icon: icons.note, label: '便签', hint: '便签（N）· 在页面任意位置点一下放置' },
   { mode: 'text', id: 'btn-text', icon: icons.text, label: '文字', hint: '文字（T）· 在页面任意位置点一下输入' },
+  { mode: 'ink', id: 'btn-ink', icon: icons.ink, label: '手绘', hint: '手绘（I）· 按住拖动画线' },
+  { mode: 'shape', id: 'btn-shape', icon: icons.shape, label: '图形', hint: '图形（G）· 拖拽画矩形/椭圆/直线/箭头' },
 ]
 
 class TopBarBase extends Destroyable {
@@ -57,6 +72,42 @@ export class TopBar extends TopBarBase {
     btn.setAttribute('aria-expanded', 'true')
     btn.innerHTML = icons.sidebar
     btn.addEventListener('click', () => this._opt.onToggleSidebar())
+    return btn
+  })()
+
+  private readonly _annoPdfBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-anno-pdf-toggle'
+    btn.title = '显示/隐藏 PDF 原生注解外观（附件图钉、声音喇叭）'
+    btn.innerHTML = icons.highlight
+    btn.setAttribute('aria-pressed', 'false')
+    btn.addEventListener('click', () => this._opt.onToggleAnnoPdf())
+    return btn
+  })()
+
+  private readonly _annoChipBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-anno-chip-toggle'
+    btn.title = '显示/隐藏音频播放按钮（按注解位置生成的播放入口）'
+    btn.innerHTML = icons.play
+    btn.setAttribute('aria-pressed', 'false')
+    btn.addEventListener('click', () => this._opt.onToggleAnnoChip())
+    return btn
+  })()
+
+  private readonly _annoMineBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-anno-mine-toggle'
+    btn.title = '显示/隐藏手动批注（便签、文字、手绘、图形）'
+    btn.innerHTML = icons.note
+    btn.setAttribute('aria-pressed', 'false')
+    btn.addEventListener('click', () => this._opt.onToggleAnnoMine())
     return btn
   })()
 
@@ -98,10 +149,22 @@ export class TopBar extends TopBarBase {
     div.appendChild(this._sidebarBtn)
     div.appendChild(this._openBtn)
     div.appendChild(title)
+    div.appendChild(this._annoPdfBtn)
+    div.appendChild(this._annoChipBtn)
+    div.appendChild(this._annoMineBtn)
     return div
   })()
 
   private readonly _toolButtons: HTMLButtonElement[] = []
+
+  /** 绘制选项条：调色板 + 线宽 +（shape 时）形状切换 */
+  private readonly _drawBar: HTMLDivElement = (() => {
+    const div = document.createElement('div')
+    div.className = 'draw-bar'
+    div.dataset.u32Name = 'draw-bar'
+    div.hidden = true
+    return div
+  })()
 
   private readonly _center: HTMLDivElement = (() => {
     const div = document.createElement('div')
@@ -125,9 +188,110 @@ export class TopBar extends TopBarBase {
       this._toolButtons.push(btn)
       tools.appendChild(btn)
     }
-    div.appendChild(tools)
+    const wrap = document.createElement('div')
+    wrap.className = 'tb-center-wrap'
+    wrap.dataset.u32Name = 'topbar-center-wrap'
+    wrap.appendChild(tools)
+    wrap.appendChild(this._drawBar)
+    div.appendChild(wrap)
     return div
   })()
+
+  /** 构建/刷新绘制选项条内容 */
+  private _buildDrawBar() {
+    const bar = this._drawBar
+    bar.replaceChildren()
+    const tool = this._opt.tool.value
+    if (tool !== 'ink' && tool !== 'shape') return
+
+    // 调色板
+    const palette = document.createElement('div')
+    palette.className = 'db-group'
+    palette.dataset.u32Name = 'draw-palette'
+    for (const c of PALETTE) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'db-swatch'
+      b.dataset.u32Name = 'draw-color'
+      b.dataset.color = c
+      b.title = '画笔颜色'
+      b.style.background = c
+      b.addEventListener('click', () => {
+        this._opt.drawColor.value = c
+        this._syncDrawBar()
+      })
+      palette.appendChild(b)
+    }
+    bar.appendChild(palette)
+
+    // 线宽
+    const widths = document.createElement('div')
+    widths.className = 'db-group'
+    widths.dataset.u32Name = 'draw-widths'
+    for (const w of [2, 4, 7]) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'db-width'
+      b.dataset.u32Name = `draw-width-${w}`
+      b.dataset.width = String(w)
+      b.title = `线宽 ${w}`
+      b.setAttribute('aria-label', `线宽 ${w}`)
+      const dot = document.createElement('i')
+      dot.style.width = dot.style.height = `${w}px`
+      b.appendChild(dot)
+      b.addEventListener('click', () => {
+        this._opt.strokeWidth.value = w
+        this._syncDrawBar()
+      })
+      widths.appendChild(b)
+    }
+    bar.appendChild(widths)
+
+    // 形状（仅 shape 工具）
+    if (tool === 'shape') {
+      const shapes = document.createElement('div')
+      shapes.className = 'db-group'
+      shapes.dataset.u32Name = 'draw-shapes'
+      const kinds: Array<{ k: ShapeKind; svg: string; label: string }> = [
+        { k: 'rect', svg: icons.shapeRect, label: '矩形' },
+        { k: 'ellipse', svg: icons.shapeEllipse, label: '椭圆' },
+        { k: 'line', svg: icons.shapeLine, label: '直线' },
+        { k: 'arrow', svg: icons.shapeArrow, label: '箭头' },
+      ]
+      for (const s of kinds) {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.className = 'db-shape'
+        b.dataset.u32Name = `draw-shape-${s.k}`
+        b.dataset.kind = s.k
+        b.title = s.label
+        b.setAttribute('aria-label', s.label)
+        b.innerHTML = s.svg
+        b.addEventListener('click', () => {
+          this._opt.shapeKind.value = s.k
+          this._syncDrawBar()
+        })
+        shapes.appendChild(b)
+      }
+      bar.appendChild(shapes)
+    }
+    this._syncDrawBar()
+  }
+
+  private _syncDrawBar() {
+    const color = this._opt.drawColor.value
+    const width = this._opt.strokeWidth.value
+    const kind = this._opt.shapeKind.value
+    for (const b of this._drawBar.querySelectorAll<HTMLButtonElement>('[data-u32-name="draw-color"]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.color === color))
+    }
+    for (const b of this._drawBar.querySelectorAll<HTMLButtonElement>('[data-u32-name^="draw-width-"]')) {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.width) === width))
+    }
+    for (const b of this._drawBar.querySelectorAll<HTMLButtonElement>('[data-u32-name^="draw-shape-"]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.kind === kind))
+    }
+  }
 
   private readonly _pageInput: HTMLInputElement = (() => {
     const input = document.createElement('input')
@@ -320,6 +484,22 @@ export class TopBar extends TopBarBase {
         for (const btn of this._toolButtons) {
           btn.setAttribute('aria-pressed', String(btn.dataset.tool === tool))
         }
+        this._buildDrawBar()
+        this._drawBar.hidden = tool !== 'ink' && tool !== 'shape'
+      }),
+    )
+
+    this.dispose(
+      watch([opt.annoPdfHidden.changed, opt.annoChipHidden.changed, opt.annoMineHidden.changed], () => {
+        this._annoPdfBtn.setAttribute('aria-pressed', String(opt.annoPdfHidden.value))
+        this._annoChipBtn.setAttribute('aria-pressed', String(opt.annoChipHidden.value))
+        this._annoMineBtn.setAttribute('aria-pressed', String(opt.annoMineHidden.value))
+      }),
+    )
+
+    this.dispose(
+      watch([opt.drawColor.changed, opt.strokeWidth.changed, opt.shapeKind.changed], () => {
+        this._syncDrawBar()
       }),
     )
   })()

@@ -40,6 +40,8 @@ export class AudioPlayer extends AudioPlayerBase {
     const span = document.createElement('span')
     span.className = 'pop-title'
     span.dataset.u32Name = 'audio-bar-title'
+    // 标题区即拖动把手：按住拖整条，松手结束；拖过后 _place 不再吸附回图标
+    span.addEventListener('pointerdown', (e) => this._beginDrag(e))
     return span
   })()
 
@@ -140,6 +142,8 @@ export class AudioPlayer extends AudioPlayerBase {
   private _audio: HTMLAudioElement | null = null
   private _objectUrl: string | null = null
   private _chip: HTMLButtonElement | null = null
+  /** 用户手动拖动过播放条后为 true：不再自动吸附到图标下方 */
+  private _manual = false
 
   private _initWatches = (() => {
     this.dispose(
@@ -191,6 +195,7 @@ export class AudioPlayer extends AudioPlayerBase {
     this._playBtn.textContent = '▶'
     this.root.dataset.open = 'false'
     this.root.style.display = 'none'
+    this._manual = false
     this._chip?.setAttribute('aria-pressed', 'false')
     this._chip = null
     this._opt.onOpenChange?.(false)
@@ -218,6 +223,11 @@ export class AudioPlayer extends AudioPlayerBase {
   }
 
   private _place(page: HTMLElement, chip: HTMLElement) {
+    // 用户拖动过就只做页面内 clamp，不再吸附回图标下方
+    if (this._manual) {
+      this._clampToPage(page)
+      return
+    }
     const pageW = page.clientWidth
     const pageH = page.clientHeight
     const w = this.root.offsetWidth || 302
@@ -235,6 +245,53 @@ export class AudioPlayer extends AudioPlayerBase {
 
     this.root.style.left = `${Math.round(left)}px`
     this.root.style.top = `${Math.round(top)}px`
+  }
+
+  /** 只把播放条夹回页面内（手动模式 / 缩放重建后防止漂出页面） */
+  private _clampToPage(page: HTMLElement) {
+    const pageW = page.clientWidth
+    const pageH = page.clientHeight
+    const w = this.root.offsetWidth || 302
+    const h = this.root.offsetHeight || 76
+    const left = clamp(parseFloat(this.root.style.left) || EDGE, EDGE, Math.max(pageW - w - EDGE, EDGE))
+    const top = clamp(parseFloat(this.root.style.top) || EDGE, EDGE, Math.max(pageH - h - EDGE, EDGE))
+    this.root.style.left = `${Math.round(left)}px`
+    this.root.style.top = `${Math.round(top)}px`
+  }
+
+  /** 拖动把手：pointerdown 起拖，capture 到松手为止 */
+  private _beginDrag(ev: PointerEvent) {
+    if (!this.isOpen) return
+    ev.preventDefault()
+    const page = this.root.parentElement as HTMLElement | null
+    if (!page) return
+    const startX = ev.clientX
+    const startY = ev.clientY
+    const startLeft = parseFloat(this.root.style.left) || this.root.offsetLeft
+    const startTop = parseFloat(this.root.style.top) || this.root.offsetTop
+    this._manual = true
+    this.root.classList.add('dragging')
+    const target = ev.currentTarget as HTMLElement
+    target.setPointerCapture(ev.pointerId)
+    const move = (e: PointerEvent) => {
+      const pageW = page.clientWidth
+      const pageH = page.clientHeight
+      const w = this.root.offsetWidth
+      const h = this.root.offsetHeight
+      const left = clamp(startLeft + e.clientX - startX, EDGE, Math.max(pageW - w - EDGE, EDGE))
+      const top = clamp(startTop + e.clientY - startY, EDGE, Math.max(pageH - h - EDGE, EDGE))
+      this.root.style.left = `${Math.round(left)}px`
+      this.root.style.top = `${Math.round(top)}px`
+    }
+    const up = () => {
+      target.removeEventListener('pointermove', move)
+      target.removeEventListener('pointerup', up)
+      target.removeEventListener('pointercancel', up)
+      this.root.classList.remove('dragging')
+    }
+    target.addEventListener('pointermove', move)
+    target.addEventListener('pointerup', up)
+    target.addEventListener('pointercancel', up)
   }
 
   private _start(audio: EmbeddedAudio) {
