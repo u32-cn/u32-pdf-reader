@@ -39,6 +39,8 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 
 ## 渲染管线易错点（都是踩过的）
 
+- **缩放滚动还原用「页锚定」不用 scrollHeight 比例**：记录视口顶压住的页号 + 页内偏移比例，重建后滚回同一页同一相对位置；比例还原在长文档缩放后必跳页
+- **弹窗类浮层（NotePopover 等）挂在 `.page-shell` 内**：页面缩放重建会连 DOM 一起替换，close 时 `root.remove()`、open 时无条件重新 append，别依赖旧挂载点存活
 - **文本层**：容器必须 `position:absolute; inset:0`，且父级设 `--scale-factor`；否则选区永远为空 → 高亮 / 下划线「看起来能用其实不能」
 - **主动渲染当前页**：`setDocument` / `rebuild` 结尾直接 render 当前页，别等 IntersectionObserver（E2E 会判定「没画」）
 - **适配宽度用 `getBoundingClientRect().width`**，不用 `clientWidth`：滚动条出现会让它跳 10px → 无谓重建 → 测试选中文字时 DOM 被换掉
@@ -50,13 +52,15 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 
 ## 环境坑（本机实测）
 
+- **手动起 electron 调试必须带 `VITE_DEV_SERVER_URL=http://localhost:5173/`**：不带就静默回退加载 `dist/renderer/` 旧产物，症状是「改了渲染层代码但行为不变」。用 `window.__app.<组件>.<方法>.toString()` 查浏览器里实际加载的源码可以快速定位。vite 进程死后 electron 也会这样回退
 - **启动 electron 前必须 `unset ELECTRON_RUN_AS_NODE`**：本机全局注入该变量，不 unset 会退化成纯 Node 进程报 `app.whenReady is not a function`
 - **electron 下载慢/失败**：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install`；缓存在 `%LOCALAPPDATA%/electron/Cache`
 - **`node_modules/electron` EBUSY**：多半是残留的后台 `npm install` 握着句柄。用 PowerShell `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` 按 CommandLine 找根 npm 进程杀掉，别反复重试安装
 - **Shell 文本处理残缺**：本机 Git Bash 缺 `grep/sed/head/tr/wc`（Exit 127）。批量文本操作用 node 或
   `C:/Users/vtxf/.workbuddy/binaries/python/versions/3.13.12/python.exe` 写小脚本，别拼管道
 - **PowerShell `Remove-Item` 被 safe-delete 包装**（trash 失败即拒绝）：删大目录用 `cmd /c rmdir /s /q`
-- **`app.asar` 句柄被后台索引长期占用**：打包必须走 `scripts/dist-app.mjs`（先打系统临时目录再搬回 `out/`），不要直接调 `electron-builder`
+- **`app.asar` 句柄被后台索引长期占用**：打包必须走 `scripts/dist-app.mjs`（先打系统临时目录再搬回 `out/`），不要直接调 `electron-builder`；搬回时旧目录被占会自动改写带时间戳的新目录（如 `out/portable-<时间>/`）
+- **目录规范（只有两个）**：`dist/` = vite/esbuild 中间产物（打包原料，不用看）；`out/` = electron-builder 最终输出，**exe 只在这里找**。不产生 `release/`（旧配置残留，已删）。`out/` 内 `portable-<时间>/u32-pdf-reader.exe` 是最新绿色版，旧的带时间戳目录 + `win-unpacked`/`portable` 是句柄占用删不掉的残留，重启 WorkBuddy 后手动清
 - **electron-builder 的 `publish` 必须显式 `null`**（`win.publish` / `nsis.publish` 都要），否则 `computeChannelNames` 读 `null.channel` 直接 exit 1
 - **`out/` 必须与 vite 的 `dist/` 分离**（`build.directories.output = "out"`），`files` 精确列举 `dist/main`、`dist/renderer`、`package.json`，否则 asar 会把整个 `node_modules` 吞进去（300MB+、exe 186MB）
 
