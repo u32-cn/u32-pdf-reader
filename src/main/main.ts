@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain, dialog } from 'electron'
 import path from 'node:path'
+import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 
 const APP_TITLE = 'U32 PDF 阅读器'
@@ -14,14 +15,16 @@ function pdfPathFromArgv(argv: string[]): string | null {
   }
   return null
 }
-import fsSync from 'node:fs'
 
 function createWindow(openPath?: string) {
+  // 阅读器不需要应用菜单栏；不置 null 会显示 Electron 默认英文菜单
+  Menu.setApplicationMenu(null)
   win = new BrowserWindow({
     width: 1280,
     height: 860,
     title: APP_TITLE,
     icon: path.join(__dirname, '../../build/icon.ico'),
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
