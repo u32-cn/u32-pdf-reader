@@ -625,6 +625,11 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 26px;
+  /* 宽随内容撑开 + 窄时居中：flex 容器直接 align-items:center 会在放大后
+     把左右溢出裁掉（overflow:auto 下左侧不可达），max-content + margin 才能让横滚完整 */
+  width: max-content;
+  min-width: 100%;
+  margin: 0 auto;
   min-height: 100%;
 }
 
