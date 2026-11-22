@@ -1,0 +1,43 @@
+{
+  "name": "u32-pdf-reader",
+  "version": "0.1.0",
+  "description": "简洁 PDF 阅读器：批注 + 内嵌音频播放",
+  "main": "dist/main/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build:main": "node esbuild-main.mjs",
+    "build": "npm run build:main && vite build",
+    "typecheck": "tsc --noEmit",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "author": "vtxf",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  },
+  "dependencies": {
+    "@vtxfp/vtxf-basic-tools-202607": "^1.0.0",
+    "pdfjs-dist": "^4.10.38"
+  },
+  "build": {
+    "appId": "cn.u32.pdfreader",
+    "productName": "u32-pdf-reader",
+    "files": [
+      "dist/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@codeup.aliyun.com:vtxf/2026/u32-pdf-reader-202611.git"
+  }
+}

@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.vtxf-ai-work/
+
+# AI agent 工具目录/文件
+.zcode/
+.claude/
+.codebuddy/
+.cursor/
+.windsurf/
+.codeium/
+.aider*
+.copilot*
+CLAUDE.md.local
+
+# 批注旁注测试产物
+*.annotations.json
+.workbuddy/
