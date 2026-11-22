@@ -696,11 +696,13 @@ export class PdfReaderApp extends Destroyable {
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
-    for (const [x0, y0, x1, y1] of record.rects) {
-      minX = Math.min(minX, x0, x1)
-      minY = Math.min(minY, y0, y1)
-      maxX = Math.max(maxX, x0, x1)
-      maxY = Math.max(maxY, y0, y1)
+    for (const r of record.rects) {
+      // 手绘线的点格式是 [x, y, 0, 0]（后两位恒 0 占位），只取前两位；
+      // shape 是 [x0, y0, x1, y1] 对角点，取全部四位
+      const xs = record.type === 'ink' ? [r[0]] : [r[0], r[2]]
+      const ys = record.type === 'ink' ? [r[1]] : [r[1], r[3]]
+      for (const x of xs) minX = Math.min(minX, x), maxX = Math.max(maxX, x)
+      for (const y of ys) minY = Math.min(minY, y), maxY = Math.max(maxY, y)
     }
     return { left: minX, top: minY, right: maxX, bottom: maxY }
   }
