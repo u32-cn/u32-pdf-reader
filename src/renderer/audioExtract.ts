@@ -5,7 +5,17 @@ export interface EmbeddedAudio {
   bytes: Uint8Array
   mime: string
   title: string
-  /** 注解在页面视口中的归一化矩形 [x0,y0,x1,y1]（0-1，左上原点） */
+  /**
+   * 注解矩形，**PDF 用户空间坐标**（左下原点，单位 pt）。
+   * 屏幕坐标一律由 PageView 用 `viewport.convertToViewportPoint` 换算，
+   * 不再假设页宽 612 —— A4、横向、旋转页都能对位。
+   */
+  rect: [number, number, number, number]
+}
+
+/** 由 pdf.js 注解表提供：注解对象号 → 页码 + 原始矩形 */
+export interface SoundAnnotRef {
+  pageNum: number
   rect: [number, number, number, number]
 }
 
@@ -74,25 +84,40 @@ function scanObjects(data: Uint8Array): Map<number, RawObject> {
 }
 
 function readRect(dict: string): [number, number, number, number] | null {
-  const m = dict.match(/\/Rect\s*\[\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\]/)
+  const m = dict.match(/\/Rect\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/)
   if (!m) return null
   return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
 }
 
 /**
+ * 廉价预检：文件里有没有 Sound 注解。
+ * 逐字节找 ASCII "/Sound"，避免为没有音频的 PDF 白扫一遍对象表。
+ */
+export function hasSoundAnnotations(data: Uint8Array): boolean {
+  const needle = [0x2f, 0x53, 0x6f, 0x75, 0x6e, 0x64] // "/Sound"
+  const limit = data.length - needle.length
+  outer: for (let i = 0; i <= limit; i++) {
+    if (data[i] !== needle[0]) continue
+    for (let k = 1; k < needle.length; k++) {
+      if (data[i + k] !== needle[k]) continue outer
+    }
+    return true
+  }
+  return false
+}
+
+/**
  * 扫描整本 PDF 提取内嵌音频（Sound 注解）。
  * 流程：扫对象 → 找 /Subtype /Sound 注解 → 解析 /Sound 引用 → 提取音频流（FLATE 自动解压）
- * → 由 /Annots 归属确定页码。
+ * → 页码与矩形由调用方用 pdf.js 注解表（对象号精确对齐）传入。
  */
 export async function collectEmbeddedAudios(
   data: Uint8Array,
-  numPages: number,
-  getPageAnnotRefs: (pageNum: number) => Promise<number[]>,
+  annots: Map<number, SoundAnnotRef>,
 ): Promise<EmbeddedAudio[]> {
   const objects = scanObjects(data)
   const results: EmbeddedAudio[] = []
 
-  // 找 Sound 注解对象
   const soundAnnots: { num: number; dict: string }[] = []
   for (const obj of objects.values()) {
     if (/\/Subtype\s*\/Sound\b/.test(obj.dict)) {
@@ -101,20 +126,14 @@ export async function collectEmbeddedAudios(
   }
   if (soundAnnots.length === 0) return results
 
-  // 页码归属：每个页面对象的 /Annots 引用
-  const pageOfAnnot = new Map<number, number>()
-  for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-    for (const ref of await getPageAnnotRefs(pageNum)) {
-      pageOfAnnot.set(ref, pageNum)
-    }
-  }
-
   for (const annot of soundAnnots) {
-    // /Sound 7 0 R
     const refM = annot.dict.match(/\/Sound\s+(\d+)\s+0\s+R/)
     if (!refM) continue
     const soundObj = objects.get(Number(refM[1]))
     if (!soundObj?.stream) continue
+
+    const where = annots.get(annot.num)
+    if (!where) continue // pdf.js 没把它归到任何页（不是页面注解），跳过
 
     let bytes = soundObj.stream
     // FLATE 压缩流（/Filter /FlateDecode）：头字节 0x78
@@ -123,22 +142,14 @@ export async function collectEmbeddedAudios(
       if (inflated) bytes = inflated
     }
 
-    const rect = readRect(annot.dict) ?? [100, 600, 200, 650]
     const titleM = annot.dict.match(/\/T\s*\(([^)]*)\)/)
     results.push({
-      pageNum: pageOfAnnot.get(annot.num) ?? 1,
+      pageNum: where.pageNum,
       bytes,
       mime: sniffAudioMime(bytes),
       title: titleM ? titleM[1] : `音频 ${results.length + 1}`,
-      rect: normRect(rect),
+      rect: readRect(annot.dict) ?? where.rect,
     })
   }
   return results
-}
-
-/** PDF 坐标（左下原点）→ 归一化（左上原点，0-1）。用标准 Letter 高度兜底归一。 */
-function normRect(r: [number, number, number, number]): [number, number, number, number] {
-  // 使用页面实际高度换算由调用方传入更准，v1 先用注解矩形相对页面（调用方页面高度约 792/842）
-  // 这里返回归一化占位，由 App 层结合页面 viewport 换算
-  return r as unknown as [number, number, number, number]
 }

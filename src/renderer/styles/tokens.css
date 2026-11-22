@@ -1,0 +1,77 @@
+/*
+ * 设计 token · 风格 A「纸感极简」
+ * 暖灰底、纸白页面、单一赭红强调、2px 直角、无装饰性阴影。
+ * 只做浅色；暗色若要做，替换本文件下半部分即可，组件层不引用任何字面色值。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 背景层级：ground（滚动区）→ surface（页面/顶栏）→ sunken（凹陷块） */
+  --bg: #f3f1ec;
+  --bg-deep: #eae6dc;
+  --surface: #fffefc;
+  --surface-2: #faf7f0;
+
+  /* 文字三级，全部 ≥4.5:1，不用透明度伪造"柔和" */
+  --ink: #1b1a17;
+  --ink-2: #45423a;
+  --muted: #736f66;
+  --faint: #9a958a;
+
+  /* 线 */
+  --line: #e2ddd2;
+  --line-strong: #cfc7b6;
+
+  /* 强调色：只用于选中/焦点/当前页/进度，占屏 <3% */
+  --accent: #8b3a2e;
+  --accent-ink: #783026;
+  --accent-wash: rgba(139, 58, 46, 0.09);
+  --accent-wash-2: rgba(139, 58, 46, 0.16);
+
+  /* 交互底色 */
+  --hover: rgba(27, 26, 23, 0.05);
+  --active: rgba(27, 26, 23, 0.1);
+
+  /* 语义色：危险只配图标+文字，不靠色相区分 */
+  --danger: #a32d2d;
+  --danger-wash: rgba(163, 45, 45, 0.08);
+
+  /* 批注色 */
+  --hl: #f4e4ac;
+  --note: #e8c96a;
+  --note-edge: #c9a63f;
+
+  /* 字体：系统栈，零外部字体 */
+  --font-ui: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --fs-sm: 12px;
+  --fs: 13px;
+  --fs-lg: 14px;
+
+  /* 尺寸 */
+  --topbar-h: 44px;
+  --sidebar-w: 220px;
+  --ctl-h: 26px;
+  --tool: 27px;
+  --viewer-pad: 28px;
+
+  /* 形态：只有两个圆角档位 */
+  --r-ctl: 2px;
+  --r-pop: 3px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 140ms;
+  --t: 180ms;
+
+  /* 阴影：只有浮层与页面卡用，且极浅 */
+  --shadow-page: 0 1px 2px rgba(60, 50, 30, 0.06);
+  --shadow-pop: 0 4px 16px rgba(50, 40, 20, 0.14), 0 1px 3px rgba(50, 40, 20, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 1ms;
+    --t: 1ms;
+  }
+}

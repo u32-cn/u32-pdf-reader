@@ -16,3 +16,5 @@ CLAUDE.md.local
 # 批注旁注测试产物
 *.annotations.json
 .workbuddy/
+out/
+release/

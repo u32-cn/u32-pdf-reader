@@ -67,7 +67,7 @@ objs[4] = streamObj(
   '',
   Buffer.from(
     'BT /F1 24 Tf 72 720 Td (Sound Annotation Sample) Tj ' +
-      '/F1 14 Tf 72 680 Td (Click the speaker icon to play embedded audio.) Tj ET',
+      '/F1 14 Tf 0 -36 Td (Click the speaker icon to play embedded audio.) Tj ET',
   ),
 )
 objs[5] = obj(5, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')

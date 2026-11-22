@@ -1,272 +1,476 @@
 import * as pdfjsLib from 'pdfjs-dist'
-import { AudioBar } from './AudioBar'
-import { AnnotationLayer, type AnnotationRecord } from './AnnotationLayer'
-import { collectEmbeddedAudios, type EmbeddedAudio } from './audioExtract'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { Destroyable, react, watch } from '@vtxfp/vtxf-basic-tools-202607/browser'
+import './styles/app.css'
+import { AnnotationStore, createAnnotationId, type AnnotationRecord } from './AnnotationStore'
+import { collectEmbeddedAudios, hasSoundAnnotations, type EmbeddedAudio, type SoundAnnotRef } from './audioExtract'
+import { AudioPlayer } from './AudioPlayer'
+import { EmptyState } from './EmptyState'
+import { NotePopover } from './NotePopover'
+import { SelectionToolbar } from './SelectionToolbar'
+import { Sidebar } from './Sidebar'
+import { TopBar, type ToolMode } from './TopBar'
+import { Viewer } from './Viewer'
+import type { PageView } from './PageView'
 import './pdf-worker'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString()
 
-const CSS_PREFIX = 'u32--app--root--1763799200000'
+/**
+ * 应用装配与状态编排：只负责「打开文档 / 工具切换 / 批注增删 / 键盘与拖拽」，
+ * 页面绘制在 Viewer/PageView，视觉在 TopBar/Sidebar，批注状态在 AnnotationStore。
+ */
+export class PdfReaderApp extends Destroyable {
+  private _store = this.disposeVar(new AnnotationStore())
+  private _pdf: PDFDocumentProxy | null = null
 
-class PdfReaderApp {
-  private _pdf: pdfjsLib.PDFDocumentProxy | null = null
-  private _pdfPath: string | null = null
-  private _audioBar = new AudioBar()
-  private _annoLayers: AnnotationLayer[] = []
-  private _savedRecords: AnnotationRecord[] = []
-  private _pendingNote: 'idle' | 'armed' = 'idle'
+  private _selectionTick = 0
 
-  private _viewer = document.querySelector('[data-u32-name="viewer"]') as HTMLDivElement
-  private _sidebar = document.querySelector('[data-u32-name="sidebar"]') as HTMLDivElement
+  private _fileName = this.disposeVar(react(''))
+  private _tool = this.disposeVar(react<ToolMode>('select'))
+  private _annoCount = this.disposeVar(react(0))
 
-  private _init = (() => {
-    document.getElementById('app')!.appendChild(this._audioBar.root)
-    document.getElementById('btn-open')!.addEventListener('click', () => this._openFile())
-    document.getElementById('btn-highlight')!.addEventListener('click', () => this._applySelection('highlight'))
-    document.getElementById('btn-underline')!.addEventListener('click', () => this._applySelection('underline'))
-    document.getElementById('btn-note')!.addEventListener('click', () => {
-      this._pendingNote = this._pendingNote === 'armed' ? 'idle' : 'armed'
-      this._setNoteCursor()
-    })
+  private _viewer = new Viewer({
+    store: this._store,
+    onAudioChip: (audio, chip) => this._player.open(audio, chip),
+    onAnnotationActivate: (record, _ev, pageView) => this._activateAnnotation(record, pageView),
+    onRebuilt: () => {
+      this.reanchorPlayer()
+      this._notePop.close()
+    },
+  })
+
+  private _topbar = new TopBar({
+    fileName: this._fileName,
+    totalPages: this._viewer.totalPages,
+    currentPage: this._viewer.currentPage,
+    zoom: this._viewer.zoom,
+    tool: this._tool,
+    annoCount: this._annoCount,
+    onOpen: () => void this.openFile(),
+    onToolChange: (tool) => this.setTool(tool),
+    onGoToPage: (page) => this.goToPage(page),
+    onZoomIn: () => this._viewer.zoomIn(),
+    onZoomOut: () => this._viewer.zoomOut(),
+    onFitWidth: () => this._viewer.fitWidth(),
+    onToggleSidebar: () => this.toggleSidebar(),
+  })
+
+  private _sidebar = new Sidebar({
+    pdf: () => this._pdf,
+    records: this._store.recordsVar,
+    currentPage: this._viewer.currentPage,
+    onGoToPage: (page) => this.goToPage(page),
+    onActivateAnnotation: (record) => this._activateFromList(record),
+    onDeleteAnnotation: (id) => this.deleteAnnotation(id),
+  })
+
+  private _player = new AudioPlayer({})
+  private _notePop = new NotePopover()
+  private _selToolbar = new SelectionToolbar({ onPick: (type) => this.applySelection(type) })
+  private _empty = new EmptyState({ onOpen: () => void this.openFile() })
+
+  /** E2E 测试钩子（生产无副作用） */
+  readonly testHooks = {
+    openPath: (path: string) => this.openPath(path),
+  }
+
+  readonly root: HTMLElement = document.getElementById('app')!
+
+  private _veil: HTMLDivElement = (() => {
+    const div = document.createElement('div')
+    div.className = 'drop-veil'
+    div.dataset.u32Name = 'drop-veil'
+    div.textContent = '松开以打开这份 PDF'
+    return div
   })()
 
-  /** 测试钩子：E2E 用（生产无副作用） */
-  readonly testHooks = {
-    openPath: (p: string) => this._openPath(p),
-  }
+  private _body: HTMLDivElement = (() => {
+    const div = document.createElement('div')
+    div.className = 'app-body'
+    div.dataset.u32Name = 'app-body'
+    div.appendChild(this._sidebar.root)
+    div.appendChild(this._viewer.root)
+    return div
+  })()
 
-  private async _openFile() {
-    const path = await window.bridge.openPdfDialog()
-    if (!path) return
-    await this._openPath(path)
-  }
+  private _mount = (() => {
+    const root = this.root
+    root.classList.add('u32pdf')
+    root.dataset.u32Name = 'app'
+    root.dataset.tool = 'select'
+    root.dataset.sidebar = 'open'
+    root.dataset.dragover = 'false'
 
-  private async _openPath(path: string) {
-    this._pdfPath = path
-    const bytes = await window.bridge.readPdf(path)
-    this._pdf = await pdfjsLib.getDocument({ data: bytes }).promise
-    await this._afterOpen(path)
-  }
+    this._viewer.root.appendChild(this._empty.root)
+    this._viewer.root.appendChild(this._veil)
+    this._empty.setVisible(true)
 
-  private async _afterOpen(path: string) {
-    const pdf = this._pdf!
-    // 清空旧视图
+    root.appendChild(this._topbar.root)
+    root.appendChild(this._body)
+    return true
+  })()
 
-    // 清空旧视图
-    this._viewer.innerHTML = ''
-    this._sidebar.innerHTML = ''
-    this._annoLayers = []
-    ;(document.querySelector('[data-u32-name="toolbar-filename"]') as HTMLSpanElement).textContent =
-      path.split(/[\\/]/).pop() || ''
+  private _init = (() => {
+    this.dispose(watch([this._store.recordsChanged], () => {
+      this._annoCount.value = this._store.records.length
+      this._viewer.repaintAnnotations()
+    }))
 
-    // 读取旁注
-    const saved = (await window.bridge.readAnnotations(path)) as AnnotationRecord[] | null
-    this._savedRecords = saved ?? []
-
-    // 渲染所有页
-    for (let i = 1; i <= pdf.numPages; i++) {
-      await this._renderPage(i)
-    }
-    // 渲染侧栏缩略图
-    for (let i = 1; i <= pdf.numPages; i++) {
-      this._renderThumbnail(i)
-    }
-
-    // 提取内嵌音频并在页面上放播放图标
-    const rawBytes = await window.bridge.readPdf(path)
-    const audios = await collectEmbeddedAudios(
-      new Uint8Array(rawBytes),
-      pdf.numPages,
-      async (pageNum) => {
-        const page = await pdf.getPage(pageNum)
-        const annots = await page.getAnnotations()
-        // pdf.js annotation 不带对象号，回退：按注解索引近似——v1 用页内 subtype 匹配
-        // 真正的对象号从 pdf.js 内部取不到，改用注解 rect 匹配 Sound 注解
-        return []
-      },
-    )
-    // 页码归属兜底：sound 注解 rect 无法与 pdf.js 注解对齐时，按对象扫描顺序无从判页
-    // 上面 getPageAnnotRefs 拿不到对象号，改为直接扫描页面对象确定 Annots
-    this._assignAudioPages(new Uint8Array(rawBytes), audios)
-    this._audioIcons = []
-    for (const audio of audios) {
-      this._audioIcons.push([audio, audio.pageNum])
-      this._placeAudioIcon(audio)
-    }
-
-    // 启用批注按钮
-    for (const id of ['btn-highlight', 'btn-underline', 'btn-note']) {
-      (document.getElementById(id) as HTMLButtonElement).disabled = false
-    }
-  }
-
-  private async _renderPage(pageNum: number) {
-    const page = await this._pdf!.getPage(pageNum)
-    const baseViewport = page.getViewport({ scale: 1 })
-    // 适配可视宽度
-    const wrap = document.querySelector('[data-u32-name="viewer-wrap"]') as HTMLDivElement
-    const scale = Math.min((wrap.clientWidth - 32) / baseViewport.width, 2)
-    const viewport = page.getViewport({ scale })
-
-    const container = document.createElement('div')
-    container.className = 'page-container'
-    container.dataset.u32Name = `page-${pageNum}`
-    container.style.width = `${viewport.width}px`
-    container.style.height = `${viewport.height}px`
-
-    const canvas = document.createElement('canvas')
-    canvas.width = viewport.width * devicePixelRatio
-    canvas.height = viewport.height * devicePixelRatio
-    canvas.style.width = `${viewport.width}px`
-    canvas.style.height = `${viewport.height}px`
-    container.appendChild(canvas)
-    this._viewer.appendChild(container)
-
-    await page.render({
-      canvasContext: canvas.getContext('2d')!,
-      viewport,
-      transform: devicePixelRatio !== 1 ? [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0] : undefined,
-    }).promise
-
-    // 批注层
-    const layer = new AnnotationLayer(pageNum)
-    layer.root.className = 'annotation-layer'
-    layer.root.dataset.u32Name = `annotation-layer-${pageNum}`
-    layer.root.classList.add('annotation-layer')
-    container.appendChild(layer.root)
-    this._annoLayers.push(layer)
-    layer.restore(this._savedRecords)
-
-    // 便签：点击空白处
-    layer.root.addEventListener('click', (e) => {
-      if (this._pendingNote !== 'armed') return
-      const rect = container.getBoundingClientRect()
-      const x = (e.clientX - rect.left) / rect.width
-      const y = (e.clientY - rect.top) / rect.height
-      const text = prompt('便签内容：')
-      if (text) {
-        layer.addNote(x, y, text)
-        this._saveAnnotations()
-      }
-      this._pendingNote = 'idle'
-      this._setNoteCursor()
-    })
-
-    // 音频图标持久化位置（重开 PDF 时重建）
-    if (this._audioIcons) {
-      for (const [audio, parentPage] of this._audioIcons) {
-        if (parentPage === pageNum) this._placeAudioIcon(audio)
-      }
-    }
-  }
-
-  /** 音频图标记录 [audio, pageNum]，供页面重渲染时恢复 */
-  private _audioIcons: [EmbeddedAudio, number][] | null = null
-
-  /** 解析每个页面对象的 /Annots 引用，把 Sound 注解归属到页码 */
-  private _assignAudioPages(data: Uint8Array, audios: EmbeddedAudio[]) {
-    if (audios.length === 0) return
-    const latin = new TextDecoder('latin1').decode(data)
-    // 页面对象：/Type /Page ... /Annots [n 0 R ...]
-    const pageRe = /\/Type\s*\/Page\b[^>]*?\/Annots\s*\[([^\]]*)\]/g
-    const annotToPage = new Map<number, number>()
-    let m: RegExpExecArray | null
-    let pageNumGuess = 1
-    while ((m = pageRe.exec(latin)) !== null) {
-      const refRe = /(\d+)\s+0\s+R/g
-      let r: RegExpExecArray | null
-      while ((r = refRe.exec(m[1])) !== null) {
-        annotToPage.set(Number(r[1]), pageNumGuess)
-      }
-      pageNumGuess++
-    }
-    // Sound 注解的对象号 → 音频条目按扫描顺序对齐（audioExtract 内部同样顺序）
-    const soundRe = /(\d+)\s+0\s+obj[\s\S]{0,400}?\/Subtype\s*\/Sound\b/g
-    const soundNums: number[] = []
-    let s: RegExpExecArray | null
-    while ((s = soundRe.exec(latin)) !== null) soundNums.push(Number(s[1]))
-    audios.forEach((audio, i) => {
-      const annotNum = soundNums[i]
-      if (annotNum != null && annotToPage.has(annotNum)) {
-        audio.pageNum = annotToPage.get(annotNum)!
-      }
-    })
-  }
-
-  private _placeAudioIcon(audio: EmbeddedAudio) {
-    const container = document.querySelector(`[data-u32-name="page-${audio.pageNum}"]`) as HTMLElement
-    if (!container) return
-    const icon = document.createElement('button')
-    icon.className = 'audio-icon'
-    icon.dataset.u32Name = 'audio-icon'
-    icon.textContent = '🔊'
-    icon.title = audio.title
-    // rect 是 PDF 坐标（左下原点），需结合页面渲染 viewport 换算
-    const [ax1, ay1, ax2, ay2] = audio.rect
-    // 查找该页 canvas 得到页面尺寸
-    const canvas = container.querySelector('canvas') as HTMLCanvasElement
-    const pw = canvas?.clientWidth || 612
-    const ph = canvas?.clientHeight || 792
-    const nx0 = Math.min(ax1, ax2) / 612
-    const nx1 = Math.max(ax1, ax2) / 612
-    // 页面 PDF 高度未知，用宽高比推：ph / (pw / 612) = PDF 高
-    const pdfH = (ph / pw) * 612
-    const ny0 = 1 - Math.max(ay1, ay2) / pdfH
-    icon.style.left = `${nx0 * 100}%`
-    icon.style.top = `${ny0 * 100}%`
-    icon.style.width = `${(nx1 - nx0) * 100}%`
-    icon.style.minWidth = '28px'
-    icon.style.height = '28px'
-    icon.addEventListener('click', (e) => {
-      e.stopPropagation()
-      this._audioBar.play(audio)
-    })
-    container.appendChild(icon)
-  }
-
-  private _renderThumbnail(pageNum: number) {
-    void (async () => {
-      const page = await this._pdf!.getPage(pageNum)
-      const base = page.getViewport({ scale: 1 })
-      const scale = 160 / base.width
-      const viewport = page.getViewport({ scale })
-      const canvas = document.createElement('canvas')
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      canvas.dataset.u32Name = `thumbnail-${pageNum}`
-      await page.render({ canvasContext: canvas.getContext('2d')!, viewport }).promise
-      canvas.addEventListener('click', () => {
-        document.querySelector(`[data-u32-name="page-${pageNum}"]`)?.scrollIntoView({ behavior: 'smooth' })
+    const onSelectionChange = () => {
+      if (this._selectionTick) return
+      this._selectionTick = requestAnimationFrame(() => {
+        this._selectionTick = 0
+        this.syncSelectionToolbar()
       })
-      this._sidebar.appendChild(canvas)
-    })()
-  }
+    }
+    document.addEventListener('selectionchange', onSelectionChange)
+    this.dispose(() => document.removeEventListener('selectionchange', onSelectionChange))
 
-  private _applySelection(type: 'highlight' | 'underline') {
-    let applied = false
-    for (const layer of this._annoLayers) {
-      if (layer.addFromSelection(type)) {
-        applied = true
-        break
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      if (!target.closest('.sel-toolbar')) this._selToolbar.hide()
+      if (!target.closest('.note-pop') && !target.closest('.anno-note') && !target.closest('.anno-text')) {
+        this._notePop.close()
       }
     }
-    if (applied) this._saveAnnotations()
-  }
+    document.addEventListener('mousedown', onDocMouseDown)
+    this.dispose(() => document.removeEventListener('mousedown', onDocMouseDown))
 
-  private async _saveAnnotations() {
-    if (!this._pdfPath) return
-    const all: AnnotationRecord[] = this._annoLayers.flatMap((l) => l.records)
-    await window.bridge.writeAnnotations(this._pdfPath, all)
-  }
-
-  private _setNoteCursor() {
-    const armed = this._pendingNote === 'armed'
-    for (const layer of this._annoLayers) {
-      layer.root.style.cursor = armed ? 'crosshair' : ''
+    const onViewerMouseDown = (e: MouseEvent) => {
+      const tool = this._tool.value
+      if (tool !== 'note' && tool !== 'text') return
+      if ((e.target as HTMLElement).closest('.note-pop, .pop-player, .audio-chip')) return
+      e.preventDefault()
     }
+    this._viewer.root.addEventListener('mousedown', onViewerMouseDown)
+    this.dispose(() => this._viewer.root.removeEventListener('mousedown', onViewerMouseDown))
+
+    const onViewerMouseUp = (e: MouseEvent) => {
+      const tool = this._tool.value
+      if (tool !== 'highlight' && tool !== 'underline') return
+      const pageView = this._pageViewFromNode(e.target as Node)
+      if (!pageView) return
+      const record = pageView.annotationLayer.recordFromSelection(tool)
+      if (record) {
+        this._store.add(record)
+        this._selToolbar.hide()
+      }
+    }
+    this._viewer.root.addEventListener('mouseup', onViewerMouseUp)
+    this.dispose(() => this._viewer.root.removeEventListener('mouseup', onViewerMouseUp))
+
+    const onClick = (e: MouseEvent) => {
+      const tool = this._tool.value
+      if (tool !== 'note' && tool !== 'text') return
+      const target = e.target as HTMLElement
+      if (target.closest('.note-pop, .pop-player, .audio-chip, .anno-note, .anno-text')) return
+      const pageView = this._pageViewFromNode(target)
+      if (!pageView) return
+      this._beginPlacement(tool, pageView, e)
+    }
+    this._viewer.root.addEventListener('click', onClick)
+    this.dispose(() => this._viewer.root.removeEventListener('click', onClick))
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      if (e.deltaY < 0) this._viewer.zoomIn()
+      else this._viewer.zoomOut()
+    }
+    this._viewer.root.addEventListener('wheel', onWheel, { passive: false })
+    this.dispose(() => this._viewer.root.removeEventListener('wheel', onWheel))
+
+    const onKeyDown = (e: KeyboardEvent) => this.handleKeyDown(e)
+    window.addEventListener('keydown', onKeyDown)
+    this.dispose(() => window.removeEventListener('keydown', onKeyDown))
+
+    const onDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      this.root.dataset.dragover = 'true'
+    }
+    const onDragLeave = (e: DragEvent) => {
+      if (e.relatedTarget) return
+      this.root.dataset.dragover = 'false'
+    }
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      this.root.dataset.dragover = 'false'
+      const file = e.dataTransfer?.files?.[0]
+      if (!file || !/\.pdf$/i.test(file.name)) return
+      const path = window.bridge.getPathForFile(file)
+      if (path) void this.openPath(path)
+    }
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('dragleave', onDragLeave)
+    window.addEventListener('drop', onDrop)
+    this.dispose(() => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('dragleave', onDragLeave)
+      window.removeEventListener('drop', onDrop)
+    })
+    return true
+  })()
+
+  /** 缩放/改宽会重建页面 DOM，播放条要迁移到新页面的同一个图标上（音频不中断） */
+  private reanchorPlayer() {
+    const audio = this._player.current.value
+    if (!this._player.isOpen || !audio) return
+    const pageView = this._viewer.pages[audio.pageNum - 1]
+    const index = this._viewer.audiosOf(audio.pageNum).indexOf(audio)
+    const chip = index >= 0 ? pageView?.chips[index] : undefined
+    if (chip) this._player.open(audio, chip)
+    else this._player.close()
+  }
+
+  /** 打开系统文件选择框 */
+  async openFile() {
+    const path = await window.bridge.openPdfDialog()
+    if (path) await this.openPath(path)
+  }
+
+  async openPath(path: string) {
+    this.setTool('select')
+    this._notePop.close()
+    this._player.close()
+
+    const buf = await window.bridge.readPdf(path)
+    const scan = new Uint8Array(buf.slice(0))
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise
+    this._pdf = doc
+
+    await this._store.load(path)
+    this._fileName.value = path.split(/[\\/]/).pop() || ''
+    this._annoCount.value = this._store.records.length
+
+    const audios = await this.collectAudios(doc, scan)
+
+    this._empty.setVisible(false)
+    await this._viewer.setDocument(doc, audios)
+    this._sidebar.buildThumbs(doc)
+  }
+
+  /** 音频提取：页码与矩形由 pdf.js 注解表精确给出，再回原始字节取流 */
+  private async collectAudios(doc: PDFDocumentProxy, scan: Uint8Array): Promise<EmbeddedAudio[]> {
+    if (!hasSoundAnnotations(scan)) return []
+    const refs = new Map<number, SoundAnnotRef>()
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i)
+      const list = await page.getAnnotations()
+      for (const a of list) {
+        if (String(a.subtype) !== 'Sound') continue
+        const m = /^(\d+)/.exec(String(a.id ?? ''))
+        if (!m) continue
+        refs.set(Number(m[1]), {
+          pageNum: i,
+          rect: a.rect as [number, number, number, number],
+        })
+      }
+    }
+    if (refs.size === 0) return []
+    return collectEmbeddedAudios(scan, refs)
+  }
+
+  setTool(tool: ToolMode) {
+    this._tool.value = tool
+    this.root.dataset.tool = tool
+    if (tool !== 'select') this._selToolbar.hide()
+    if (tool === 'note' || tool === 'text') {
+      // 放置类工具需要干净页面：清选区、收起播放条
+      window.getSelection()?.removeAllRanges()
+      this._player.close()
+    }
+  }
+
+  goToPage(page: number) {
+    const total = this._viewer.totalPages.value
+    if (total === 0) return
+    this._viewer.scrollToPage(Math.min(Math.max(Math.round(page), 1), total))
+  }
+
+  toggleSidebar() {
+    const open = this.root.dataset.sidebar !== 'closed'
+    this.root.dataset.sidebar = open ? 'closed' : 'open'
+    this._topbar.root
+      .querySelector('[data-u32-name="topbar-sidebar"]')
+      ?.setAttribute('aria-expanded', String(!open))
+  }
+
+  /** 用当前选区直接打高亮/下划线（浮条与 H/U 快捷键共用） */
+  applySelection(type: 'highlight' | 'underline') {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed) return
+    const pageView = this._pageViewFromNode(sel.anchorNode)
+    if (!pageView) return
+    const record = pageView.annotationLayer.recordFromSelection(type)
+    if (record) this._store.add(record)
+    this._selToolbar.hide()
+  }
+
+  deleteAnnotation(id: string) {
+    this._notePop.close()
+    this._store.remove(id)
+  }
+
+  private _beginPlacement(tool: 'note' | 'text', pageView: PageView, ev: MouseEvent) {
+    const [x, y] = pageView.annotationLayer.pointOf(ev)
+    const box = pageView.annotationLayer.root.getBoundingClientRect()
+    this._notePop.open(pageView.root, {
+      kind: tool,
+      initial: '',
+      left: ev.clientX - box.left,
+      top: ev.clientY - box.top,
+      onSave: (text) => {
+        if (text) {
+          this._store.add({
+            id: createAnnotationId(),
+            type: tool,
+            page: pageView.pageNum,
+            rects: [[x, y, x, y]],
+            text,
+            createdAt: Date.now(),
+          })
+        }
+        // 便签允许连放；文字放完自动回指针，避免误点出一堆空框
+        if (tool === 'text') this.setTool('select')
+      },
+    })
+  }
+
+  private _activateAnnotation(record: AnnotationRecord, pageView: PageView) {
+    if (record.type !== 'note' && record.type !== 'text') return
+    const [x, y] = record.rects[0] ?? [0, 0, 0, 0]
+    const width = pageView.root.clientWidth
+    const height = pageView.root.clientHeight
+    this._notePop.open(pageView.root, {
+      kind: record.type,
+      initial: record.text ?? '',
+      left: x * width + 14,
+      top: y * height + 14,
+      editing: true,
+      onSave: (text) => this._store.setText(record.id, text),
+      onDelete: () => this._store.remove(record.id),
+    })
+  }
+
+  private _activateFromList(record: AnnotationRecord) {
+    this.goToPage(record.page)
+    const pageView = this._viewer.pages[record.page - 1]
+    if (!pageView) return
+    if (record.type === 'note' || record.type === 'text') this._activateAnnotation(record, pageView)
+  }
+
+  private _pageViewFromNode(node: Node | null): PageView | null {
+    if (!node) return null
+    const el = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement
+    const shell = el?.closest('.page-shell') as HTMLElement | null
+    if (!shell) return null
+    const n = Number(shell.dataset.page)
+    return this._viewer.pages[n - 1] ?? null
+  }
+
+  private syncSelectionToolbar() {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+      this._selToolbar.hide()
+      return
+    }
+    const range = sel.getRangeAt(0)
+    if (!this._pageViewFromNode(range.commonAncestorContainer)) {
+      this._selToolbar.hide()
+      return
+    }
+    const rect = range.getBoundingClientRect()
+    if (rect.width < 1 && rect.height < 1) {
+      this._selToolbar.hide()
+      return
+    }
+    this._selToolbar.show(rect)
+  }
+
+  private handleKeyDown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null
+    const typing =
+      !!target &&
+      (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+
+    if (e.ctrlKey || e.metaKey) {
+      switch (e.key) {
+        case 'o':
+        case 'O':
+          e.preventDefault()
+          void this.openFile()
+          return
+        case '=':
+        case '+':
+          e.preventDefault()
+          this._viewer.zoomIn()
+          return
+        case '-':
+          e.preventDefault()
+          this._viewer.zoomOut()
+          return
+        case '0':
+          e.preventDefault()
+          this._viewer.fitWidth()
+          return
+        default:
+          return
+      }
+    }
+
+    if (e.key === 'Escape') {
+      if (this._notePop.isOpen) {
+        this._notePop.close()
+        return
+      }
+      if (this._player.isOpen) {
+        this._player.close()
+        return
+      }
+      if (this._selToolbar.isOpen) {
+        this._selToolbar.hide()
+        return
+      }
+      if (this._tool.value !== 'select') this.setTool('select')
+      return
+    }
+
+    if (typing) return
+
+    switch (e.key.toLowerCase()) {
+      case 'h':
+        this.setTool('highlight')
+        break
+      case 'u':
+        this.setTool('underline')
+        break
+      case 'n':
+        this.setTool('note')
+        break
+      case 't':
+        this.setTool('text')
+        break
+      case 'v':
+        this.setTool('select')
+        break
+      case 'arrowleft':
+        this.goToPage(this._viewer.currentPage.value - 1)
+        break
+      case 'arrowright':
+        this.goToPage(this._viewer.currentPage.value + 1)
+        break
+      default:
+        return
+    }
+    e.preventDefault()
   }
 }
 
-const __appInstance = new PdfReaderApp()
-// E2E 测试钩子
-;(window as unknown as { __app: PdfReaderApp }).__app = __appInstance
+const app = new PdfReaderApp()
+;(window as unknown as { __app: PdfReaderApp }).__app = app

@@ -9,31 +9,46 @@
     "build:main": "node esbuild-main.mjs",
     "build": "npm run build:main && vite build",
     "typecheck": "tsc --noEmit",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "node scripts/dist-app.mjs",
+    "pack": "node scripts/dist-app.mjs --dir"
   },
   "author": "vtxf",
   "license": "MIT",
   "devDependencies": {
+    "@vtxfp/vtxf-basic-tools-202607": "^1.0.0",
     "concurrently": "^9.1.2",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
+    "pdfjs-dist": "^4.10.38",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "wait-on": "^8.0.1"
   },
-  "dependencies": {
-    "@vtxfp/vtxf-basic-tools-202607": "^1.0.0",
-    "pdfjs-dist": "^4.10.38"
-  },
   "build": {
     "appId": "cn.u32.pdfreader",
     "productName": "u32-pdf-reader",
+    "directories": {
+      "output": "out"
+    },
     "files": [
-      "dist/**/*"
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "package.json",
+      "!node_modules/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "artifactName": "${productName}-${version}-setup.${ext}",
+      "publish": null,
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "u32 PDF 阅读器",
+      "publish": null
     }
   },
   "repository": {
