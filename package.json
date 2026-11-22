@@ -1,6 +1,6 @@
 {
   "name": "u32-pdf-reader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "简洁 PDF 阅读器：批注 + 内嵌音频播放",
   "main": "dist/main/main.cjs",
   "type": "module",
