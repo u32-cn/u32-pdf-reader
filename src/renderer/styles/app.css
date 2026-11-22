@@ -721,9 +721,10 @@ body {
   opacity: 1;
 }
 
+/* shape/ink 选中：加粗描边 + 外圈光晕，远看也知道被选中 */
 .annotation-layer .anno-svg .anno-hit.anno-selected {
-  filter: drop-shadow(0 0 2px var(--accent));
-  stroke: var(--accent) !important;
+  stroke-width: 3px !important;
+  filter: drop-shadow(0 0 3px var(--accent)) drop-shadow(0 0 1px var(--accent));
 }
 
 .anno-hl {
@@ -1176,6 +1177,68 @@ body {
 .sel-toolbar button:hover {
   background: var(--hover);
   color: var(--ink);
+}
+
+/* ============================================================
+   手绘/图形选中工具条（挂在 .page-shell 内，锚在图形上方）
+   ============================================================ */
+
+.shape-tb {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pop);
+  box-shadow: var(--shadow-pop);
+}
+
+.shape-tb[hidden] {
+  display: none;
+}
+
+.shape-tb .stb-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.shape-tb .db-width {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+
+.shape-tb .db-width i {
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.shape-tb .db-width[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.shape-tb .np-btn {
+  height: 22px;
+  width: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ============================================================

@@ -8,6 +8,7 @@ import { AudioPlayer } from './AudioPlayer'
 import { EmptyState } from './EmptyState'
 import { NotePopover } from './NotePopover'
 import { SelectionToolbar } from './SelectionToolbar'
+import { ShapeToolbar } from './ShapeToolbar'
 import { Sidebar } from './Sidebar'
 import { TopBar, type ToolMode } from './TopBar'
 import { Viewer } from './Viewer'
@@ -132,6 +133,13 @@ export class PdfReaderApp extends Destroyable {
 
   private _player = new AudioPlayer({})
   private _notePop = new NotePopover()
+  private _shapeTb = new ShapeToolbar({
+    onColor: (color) => this._updateSelectedStyle({ color }),
+    onWidth: (width) => this._updateSelectedStyle({ strokeWidth: width }),
+    onDelete: () => {
+      if (this._selectedAnnoId) this.deleteAnnotation(this._selectedAnnoId)
+    },
+  })
   private _selToolbar = new SelectionToolbar({ onPick: (type) => this.applySelection(type) })
   private _empty = new EmptyState({ onOpen: () => void this.openFile() })
 
@@ -202,10 +210,10 @@ export class PdfReaderApp extends Destroyable {
       if (!target.closest('.note-pop') && !target.closest('.anno-note') && !target.closest('.anno-text')) {
         this._notePop.close()
       }
-      // 点空白处清除手动批注选中态（点在批注/弹窗/播放条上则保留）
+      // 点空白处清除手动批注选中态（点在批注/弹窗/播放条/图形工具条上则保留）
       if (
         this._selectedAnnoId &&
-        !target.closest('.anno-note, .anno-text, .anno-svg, .note-pop, .pop-player')
+        !target.closest('.anno-note, .anno-text, .anno-svg, .note-pop, .pop-player, .shape-tb')
       ) {
         this._clearSelectedAnno()
       }
@@ -413,6 +421,10 @@ export class PdfReaderApp extends Destroyable {
     // PDF 组还要控制 canvas 里的注解外观（附件图钉、Sound 喇叭是 pdf.js 画的像素，CSS 管不到）
     if (group === 'pdf') {
       this._viewer.setPdfAnnotationMode(v.value ? 0 : 1)
+    } else if (group === 'mine' && v.value) {
+      // 隐藏手动批注时收掉选中态与工具条
+      this._clearSelectedAnno()
+      this._notePop.close()
     }
   }
 
@@ -447,6 +459,7 @@ export class PdfReaderApp extends Destroyable {
     const el = this._viewer.root.querySelector(`[data-id="${CSS.escape(this._selectedAnnoId)}"]`)
     el?.classList.remove('anno-selected')
     this._selectedAnnoId = null
+    this._shapeTb.close()
   }
 
   /** 当前工具对应的批注样式 */
@@ -646,6 +659,7 @@ export class PdfReaderApp extends Destroyable {
       const width = pageView.root.clientWidth
       const height = pageView.root.clientHeight
       this._pendingStyle = { ...record.style }
+      this._shapeTb.close()
       this._notePop.open(pageView.root, {
         kind: record.type,
         initial: record.text ?? '',
@@ -667,9 +681,43 @@ export class PdfReaderApp extends Destroyable {
       return
     }
     if (record.type === 'ink' || record.type === 'shape') {
-      // 点击已有笔画：换颜色/线宽直接生效（无弹窗）
-      this._store.updateStyle(record.id, this._currentDrawStyle())
+      // 选中手绘/图形：弹就地工具条（换色/线宽/删除），不再静默套用画笔样式
+      this._notePop.close()
+      const style = record.style ?? {}
+      this._shapeTb.sync(style.color ?? DEFAULT_ANNO_STYLE.color, style.strokeWidth ?? DEFAULT_ANNO_STYLE.strokeWidth)
+      const box = this._annoBoxOf(record)
+      this._shapeTb.open(pageView.root, box)
     }
+  }
+
+  /** 手绘/图形的归一化包围盒（工具条锚点用） */
+  private _annoBoxOf(record: AnnotationRecord): { left: number; top: number; right: number; bottom: number } {
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const [x0, y0, x1, y1] of record.rects) {
+      minX = Math.min(minX, x0, x1)
+      minY = Math.min(minY, y0, y1)
+      maxX = Math.max(maxX, x0, x1)
+      maxY = Math.max(maxY, y0, y1)
+    }
+    return { left: minX, top: minY, right: maxX, bottom: maxY }
+  }
+
+  /** 工具条改选中图形的样式（部分字段，落库全量 style） */
+  private _updateSelectedStyle(patch: Partial<AnnotationStyle>) {
+    const id = this._selectedAnnoId
+    if (!id) return
+    const record = this._store.records.find((r) => r.id === id)
+    if (!record) return
+    this._store.updateStyle(id, { ...record.style, ...patch })
+    // 工具条回显新值
+    const cur = record.style ?? {}
+    this._shapeTb.sync(
+      patch.color ?? cur.color ?? DEFAULT_ANNO_STYLE.color,
+      patch.strokeWidth ?? cur.strokeWidth ?? DEFAULT_ANNO_STYLE.strokeWidth,
+    )
   }
 
   private _activateFromList(record: AnnotationRecord) {
@@ -746,6 +794,11 @@ export class PdfReaderApp extends Destroyable {
       }
       if (this._notePop.isOpen) {
         this._notePop.close()
+        this._clearSelectedAnno()
+        return
+      }
+      if (this._shapeTb.isOpen) {
+        this._shapeTb.close()
         this._clearSelectedAnno()
         return
       }
