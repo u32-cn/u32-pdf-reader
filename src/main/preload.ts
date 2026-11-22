@@ -7,4 +7,8 @@ contextBridge.exposeInMainWorld('bridge', {
   writeAnnotations: (pdfPath: string, data: unknown) =>
     ipcRenderer.invoke('write-annotations', pdfPath, data),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  setWindowTitle: (title: string) => ipcRenderer.invoke('set-window-title', title),
+  onOpenPdfPath: (cb: (path: string) => void) => {
+    ipcRenderer.on('open-pdf-path', (_e, path: string) => cb(path))
+  },
 })

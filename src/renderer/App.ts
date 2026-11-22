@@ -62,6 +62,9 @@ export class PdfReaderApp extends Destroyable {
   private _tool = this.disposeVar(react<ToolMode>('select'))
   private _annoCount = this.disposeVar(react(0))
 
+  /** 窗口标题常量 */
+  private static readonly APP_TITLE = 'U32 PDF 阅读器'
+
   /** 绘制工具状态（顶栏选项条读写，落库时套用） */
   private _drawColor = this.disposeVar(react<string>(DEFAULT_ANNO_STYLE.color))
   private _strokeWidth = this.disposeVar(react<number>(DEFAULT_ANNO_STYLE.strokeWidth))
@@ -98,7 +101,6 @@ export class PdfReaderApp extends Destroyable {
   })
 
   private _topbar = new TopBar({
-    fileName: this._fileName,
     totalPages: this._viewer.totalPages,
     currentPage: this._viewer.currentPage,
     zoom: this._viewer.zoom,
@@ -120,15 +122,25 @@ export class PdfReaderApp extends Destroyable {
     onToggleAnnoPdf: () => this.toggleAnnoVisibility('pdf'),
     onToggleAnnoChip: () => this.toggleAnnoVisibility('chip'),
     onToggleAnnoMine: () => this.toggleAnnoVisibility('mine'),
+    canUndo: () => this._store.canUndo,
+    canRedo: () => this._store.canRedo,
+    historyChanged: this._store.historyChanged,
+    onUndo: () => this._store.undo(),
+    onRedo: () => this._store.redo(),
+    hasBookmark: () => this._store.hasBookmark(this._viewer.currentPage.value) !== undefined,
+    bookmarksChanged: this._store.bookmarksReactive,
+    onToggleBookmark: () => this._store.toggleBookmark(this._viewer.currentPage.value),
   })
 
   private _sidebar = new Sidebar({
     pdf: () => this._pdf,
     records: this._store.recordsVar,
+    bookmarks: this._store.bookmarksVar,
     currentPage: this._viewer.currentPage,
     onGoToPage: (page) => this.goToPage(page),
     onActivateAnnotation: (record) => this._activateFromList(record),
     onDeleteAnnotation: (id) => this.deleteAnnotation(id),
+    onToggleBookmark: (page) => this._store.toggleBookmark(page),
   })
 
   private _player = new AudioPlayer({})
@@ -297,6 +309,9 @@ export class PdfReaderApp extends Destroyable {
     window.addEventListener('keydown', onKeyDown)
     this.dispose(() => window.removeEventListener('keydown', onKeyDown))
 
+    // main 进程转来的打开请求：双击关联文件 / 第二实例
+    window.bridge.onOpenPdfPath((p) => void this.openPath(p))
+
     const onDragOver = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes('Files')) return
       e.preventDefault()
@@ -353,7 +368,9 @@ export class PdfReaderApp extends Destroyable {
     this._pdf = doc
 
     await this._store.load(path)
-    this._fileName.value = path.split(/[\\/]/).pop() || ''
+    const name = path.split(/[\\/]/).pop() || ''
+    this._fileName.value = name
+    void window.bridge.setWindowTitle(`${name} - ${PdfReaderApp.APP_TITLE}`)
     this._annoCount.value = this._store.records.length
 
     const audios = await this.collectAudios(doc, scan)
@@ -769,6 +786,17 @@ export class PdfReaderApp extends Destroyable {
         case 'O':
           e.preventDefault()
           void this.openFile()
+          return
+        case 'z':
+        case 'Z':
+          e.preventDefault()
+          if (e.shiftKey) this._store.redo()
+          else this._store.undo()
+          return
+        case 'y':
+        case 'Y':
+          e.preventDefault()
+          this._store.redo()
           return
         case '=':
         case '+':

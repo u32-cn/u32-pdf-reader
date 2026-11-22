@@ -46,6 +46,9 @@ export const icons = {
   play: solid('<path d="M5 3.2 12 8l-7 4.8Z"/>'),
   pause: solid('<rect x="4.6" y="3.4" width="2.3" height="9.2" rx=".4"/><rect x="9.1" y="3.4" width="2.3" height="9.2" rx=".4"/>'),
   trash: line('<path d="M3.5 5h9"/><path d="M6.2 5V3.6h3.6V5"/><path d="M4.8 5l.5 8h5.4l.5-8"/>'),
+  bookmark: line('<path d="M4.5 2.8h7v10.4L8 10.2l-3.5 3Z"/>'),
+  undo: line('<path d="M3.5 7.5h6a3.2 3.2 0 0 1 0 6.4H6"/><path d="M6 4 3 7.2 6 10.2"/>'),
+  redo: line('<path d="M12.5 7.5h-6a3.2 3.2 0 0 0 0 6.4H10"/><path d="M10 4 13 7.2 10 10.2"/>'),
   copy: line('<rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5V3.6a1 1 0 0 0-1-1H3.6a1 1 0 0 0-1 1v5.9a1 1 0 0 0 1 1h1.9"/>'),
 } as const
 

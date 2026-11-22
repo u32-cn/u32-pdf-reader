@@ -43,6 +43,14 @@
       "publish": null,
       "icon": "build/icon.ico"
     },
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "U32 PDF 阅读器",
+        "description": "用 U32 PDF 阅读器打开",
+        "role": "Viewer"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

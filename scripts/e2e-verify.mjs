@@ -191,10 +191,10 @@ const listOk = await evaluate(`(() => {
   document.querySelector('[data-u32-name="side-tab-anno"]').click()
   return {
     items: document.querySelectorAll('[data-u32-name="anno-item"]').length,
-    meta: document.querySelector('[data-u32-name="topbar-meta"]').textContent,
+    title: document.title,
   }
 })()`)
-check('侧栏批注列表同步', listOk.items >= 2, `条目=${listOk.items} 顶栏="${listOk.meta}"`)
+check('侧栏批注列表同步', listOk.items >= 2, `条目=${listOk.items} 标题="${listOk.title}"`)
 
 // ── 8. 音频图标 → 浮动播放条 ────────────────────────────────
 const iconCount = await evaluate(`document.querySelectorAll('[data-u32-name="audio-icon"]').length`)

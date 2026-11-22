@@ -1,13 +1,12 @@
 import { Destroyable, watch } from '@vtxfp/vtxf-basic-tools-202607/browser'
 import type { ReactiveVariable } from '@vtxfp/vtxf-basic-tools-202607/browser'
-import { PALETTE, type ShapeKind } from './AnnotationStore'
+import { PALETTE, type BookmarkRecord, type ShapeKind } from './AnnotationStore'
 import { icons } from './icons'
 
 export type ToolMode = 'select' | 'highlight' | 'underline' | 'note' | 'text' | 'ink' | 'shape'
 export type DrawColor = string
 
 export interface TopBarOptions {
-  fileName: ReactiveVariable<string>
   totalPages: ReactiveVariable<number>
   currentPage: ReactiveVariable<number>
   zoom: ReactiveVariable<number>
@@ -27,6 +26,16 @@ export interface TopBarOptions {
   onToggleAnnoPdf: () => void
   onToggleAnnoChip: () => void
   onToggleAnnoMine: () => void
+  /** 撤销/重做（历史栈状态由 App 反映，canUndo/canRedo 两个 getter） */
+  canUndo: () => boolean
+  canRedo: () => boolean
+  historyChanged: ReactiveVariable<number>
+  onUndo: () => void
+  onRedo: () => void
+  /** 当前页书签开关 */
+  hasBookmark: () => boolean
+  bookmarksChanged: ReactiveVariable<BookmarkRecord[]>
+  onToggleBookmark: () => void
   /** 绘制工具状态（App 持有真实状态，顶栏只反映） */
   drawColor: ReactiveVariable<DrawColor>
   strokeWidth: ReactiveVariable<number>
@@ -111,6 +120,43 @@ export class TopBar extends TopBarBase {
     return btn
   })()
 
+  private readonly _undoBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-undo'
+    btn.title = '撤销（Ctrl+Z）'
+    btn.innerHTML = icons.undo
+    btn.disabled = true
+    btn.addEventListener('click', () => this._opt.onUndo())
+    return btn
+  })()
+
+  private readonly _redoBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-redo'
+    btn.title = '重做（Ctrl+Shift+Z）'
+    btn.innerHTML = icons.redo
+    btn.disabled = true
+    btn.addEventListener('click', () => this._opt.onRedo())
+    return btn
+  })()
+
+  private readonly _bookmarkBtn: HTMLButtonElement = (() => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'icon-btn'
+    btn.dataset.u32Name = 'topbar-bookmark'
+    btn.title = '当前页加/删书签'
+    btn.innerHTML = icons.bookmark
+    btn.disabled = true
+    btn.setAttribute('aria-pressed', 'false')
+    btn.addEventListener('click', () => this._opt.onToggleBookmark())
+    return btn
+  })()
+
   private readonly _openBtn: HTMLButtonElement = (() => {
     const btn = document.createElement('button')
     btn.type = 'button'
@@ -123,32 +169,15 @@ export class TopBar extends TopBarBase {
     return btn
   })()
 
-  private readonly _name = (() => {
-    const span = document.createElement('span')
-    span.className = 'doc-name'
-    span.dataset.u32Name = 'topbar-filename'
-    return span
-  })()
-
-  private readonly _meta = (() => {
-    const span = document.createElement('span')
-    span.className = 'doc-meta'
-    span.dataset.u32Name = 'topbar-meta'
-    return span
-  })()
-
   private readonly _left: HTMLDivElement = (() => {
     const div = document.createElement('div')
     div.className = 'tb-left'
     div.dataset.u32Name = 'topbar-left'
-    const title = document.createElement('div')
-    title.className = 'doc-title'
-    title.dataset.u32Name = 'topbar-title'
-    title.appendChild(this._name)
-    title.appendChild(this._meta)
     div.appendChild(this._sidebarBtn)
     div.appendChild(this._openBtn)
-    div.appendChild(title)
+    div.appendChild(this._undoBtn)
+    div.appendChild(this._redoBtn)
+    div.appendChild(this._bookmarkBtn)
     div.appendChild(this._annoPdfBtn)
     div.appendChild(this._annoChipBtn)
     div.appendChild(this._annoMineBtn)
@@ -433,19 +462,9 @@ export class TopBar extends TopBarBase {
     const opt = this._opt
 
     this.dispose(
-      watch([opt.fileName.changed], () => {
-        this._name.textContent = opt.fileName.value
-        this._name.title = opt.fileName.value
-      }),
-    )
-
-    this.dispose(
       watch([opt.totalPages.changed, opt.annoCount.changed], () => {
         const total = opt.totalPages.value
-        const count = opt.annoCount.value
         this._totalLabel.textContent = String(total)
-        this._meta.textContent =
-          total === 0 ? '' : count > 0 ? `${total} 页 · ${count} 处批注` : `${total} 页`
         if (total === 0) this._pageInput.value = ''
         this._pageInput.disabled = total === 0
         this._prevBtn.disabled = total === 0
@@ -455,6 +474,22 @@ export class TopBar extends TopBarBase {
         this._zoomInBtn.disabled = total === 0
         this._zoomLabel.disabled = total === 0
         this._fitBtn.disabled = total === 0
+        this._bookmarkBtn.disabled = total === 0
+      }),
+    )
+
+    this.dispose(
+      watch([opt.historyChanged.changed], () => {
+        this._undoBtn.disabled = !opt.canUndo()
+        this._redoBtn.disabled = !opt.canRedo()
+      }),
+    )
+
+    this.dispose(
+      watch([opt.bookmarksChanged.changed, opt.currentPage.changed], () => {
+        const marked = opt.hasBookmark()
+        this._bookmarkBtn.setAttribute('aria-pressed', String(marked))
+        this._bookmarkBtn.title = marked ? '删除当前页书签' : '当前页加书签'
       }),
     )
 
