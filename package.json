@@ -61,10 +61,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vtxf/u32-pdf-reader.git"
+    "url": "git+https://github.com/u32-cn/u32-pdf-reader.git"
   },
   "homepage": "https://u32-cn.github.io/u32-pdf-reader/",
   "bugs": {
-    "url": "https://github.com/vtxf/u32-pdf-reader/issues"
+    "url": "https://github.com/u32-cn/u32-pdf-reader/issues"
   }
 }
