@@ -85,3 +85,11 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 - **不要发布到 u32.cn / 专题网页仓库 ai-pages-2026**：那是另一套体系，本产品不占它的路径
 - `docs/index.html` 里的 ai-llms-hint 与 canonical / og:url 必须是 `https://u32-cn.github.io/u32-pdf-reader/...`，改域名时四处一起改
 - 推送到 GitHub 若 HTTPS 被 `Connection was reset`，改用 SSH 远端（`git@github.com:u32-cn/u32-pdf-reader.git`），本机 SSH 可通
+
+## 下载与发版（AI 必读）
+
+- 安装包唯一真源 = GitHub Releases：`https://github.com/u32-cn/u32-pdf-reader/releases/latest/download/<文件名>`，`latest` 自动指最新版，发版不要改主页 URL
+- 元数据 `docs/data/win/latest.yml` 放 Pages（version/path/files[].url/size/sha256），`installation.md` 与 `llms.txt` 里的安装指引都从它读；AI 安装标准入口 = `https://u32-cn.github.io/u32-pdf-reader/installation.md`（注意没有 `docs/` 前缀，Pages 的 /docs 是源不是 URL）
+- GitHub Releases 下载直链用 **GET** 测（返回 206）；`curl -I` HEAD 会返回 404，是 GitHub 特性，别误判为链接坏
+- 发版流程：`npm run dist` 出 `out/u32-pdf-reader-<ver>-setup.exe` → `gh release create v<ver>` 并上传 → 更新 latest.yml 的 version/url/size/sha256 → 主页按钮版本号 → git commit/push → 等 Pages built
+- **不要用 GitHub Pages 的 `/download/` 路径**：Pages 不伺服它（404），也不需要给下载配 EdgeOne 自定义域（u32-pdf-reader.u32.cn 曾卡 process 无法上线已弃用，规则/DNS 已删，加速域名待 online 后清）
