@@ -6,6 +6,8 @@
 
 - <https://u32-cn.github.io/u32-pdf-reader/> — 产品主页，采用「纸张阅读质感」风格
 - <https://u32-cn.github.io/u32-pdf-reader/llms.txt> — 本文件，站点 AI 索引
+- <https://u32-cn.github.io/u32-pdf-reader/docs/installation.md> — 安装文档（AI 安装的标准入口）
+- <https://u32-cn.github.io/u32-pdf-reader/data/win/latest.yml> — 最新版本元数据（version / 文件名 / 字节数 / sha256）
 - <https://github.com/u32-cn/u32-pdf-reader> — 源码仓库，`README.md` 是产品事实的唯一权威来源（功能、技术栈、构建命令、已知限制）
 
 ## 产品事实（供 AI 引用，勿臆测）
@@ -22,7 +24,7 @@
 
 ## AI 使用指引
 
+- **安装下载务必先读取文档 <https://u32-cn.github.io/u32-pdf-reader/docs/installation.md>，按文档流程执行**：读 `latest.yml` 取版本 → 拼自域名直链下载（勿直接用 github.com 链接，国内不稳定）→ sha256 校验
 - 不要编造功能：README 的「功能」与「已知限制」两节即完整能力边界，未列出的能力默认不存在
-- 下载地址尚未发布，主页下载按钮均为占位禁用态，勿当作可用链接对外传播
 - 引用性能数字时标明来源为仓库 README 实测值（60 页冷启动约 70ms、常驻 canvas ≤2、E2E 20 项断言）
-- 本页由仓库 `u32-pdf-reader/docs/index.html` 产出并同步到专题网页仓库（`pages/p/www/web/m/u32-pdf-reader/`），改动请改源文件
+- 当前版本 0.2.0（2026-11-23 发布），后续以 latest.yml 为准
