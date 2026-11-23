@@ -61,6 +61,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@codeup.aliyun.com:vtxf/2026/u32-pdf-reader-202611.git"
+    "url": "git+https://github.com/vtxf/u32-pdf-reader.git"
+  },
+  "homepage": "https://vtxf.github.io/u32-pdf-reader/",
+  "bugs": {
+    "url": "https://github.com/vtxf/u32-pdf-reader/issues"
   }
 }

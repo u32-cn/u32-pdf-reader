@@ -3,6 +3,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const WebSocket = require('ws')
@@ -46,7 +47,7 @@ const uiOk = await evaluate(`(() => {
 check('工具栏按钮齐全', uiOk)
 
 // 2. 走 App.testHooks.openPath 完整打开流程
-const pdfPath = 'S:/vtxf/vtxf-work/projects/vtxf/u32-pdf-reader-202611/test/sample_audio.pdf'
+const pdfPath = fileURLToPath(new URL('../test/sample_audio.pdf', import.meta.url)).replace(/\\/g, '/')
 await evaluate(`window.__app.testHooks.openPath('${pdfPath.replace(/\\/g, '/')}')`)
 check('App 完整打开流程无异常', true, pdfPath)
 

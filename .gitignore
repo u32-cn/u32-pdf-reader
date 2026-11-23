@@ -18,3 +18,6 @@ CLAUDE.md.local
 .workbuddy/
 out/
 release/
+
+# 私有 npm registry 配置（含内部地址，不入库）
+.npmrc

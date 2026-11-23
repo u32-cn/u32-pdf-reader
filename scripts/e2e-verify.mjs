@@ -5,12 +5,14 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const WebSocket = require('ws')
 
 const PORT = process.env.CDP_PORT || 9222
-const PDF_PATH = 'S:/vtxf/vtxf-work/projects/vtxf/u32-pdf-reader-202611/test/sample_audio.pdf'
+// 相对脚本位置解析，换机器 / 换目录都不用改
+const PDF_PATH = fileURLToPath(new URL('../test/sample_audio.pdf', import.meta.url)).replace(/\\/g, '/')
 const ANNO_PATH = PDF_PATH.replace(/\.pdf$/i, '.annotations.json')
 
 // 干净起点：清掉上一轮留下的旁注，批注计数才可判定

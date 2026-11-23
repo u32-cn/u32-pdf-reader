@@ -1,0 +1,2 @@
+# 私有 registry 配置示例：复制为 .npmrc 后填入内部地址
+# @vtxfp:registry=https://<your-private-registry>/npm/npm-registry/

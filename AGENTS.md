@@ -56,8 +56,7 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 - **启动 electron 前必须 `unset ELECTRON_RUN_AS_NODE`**：本机全局注入该变量，不 unset 会退化成纯 Node 进程报 `app.whenReady is not a function`
 - **electron 下载慢/失败**：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install`；缓存在 `%LOCALAPPDATA%/electron/Cache`
 - **`node_modules/electron` EBUSY**：多半是残留的后台 `npm install` 握着句柄。用 PowerShell `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` 按 CommandLine 找根 npm 进程杀掉，别反复重试安装
-- **Shell 文本处理残缺**：本机 Git Bash 缺 `grep/sed/head/tr/wc`（Exit 127）。批量文本操作用 node 或
-  `C:/Users/vtxf/.workbuddy/binaries/python/versions/3.13.12/python.exe` 写小脚本，别拼管道
+- **Shell 文本处理残缺**：本机 Git Bash 缺 `grep/sed/head/tr/wc`（Exit 127）。批量文本操作用 node 或托管目录下的 python 绝对路径写小脚本，别拼管道
 - **PowerShell `Remove-Item` 被 safe-delete 包装**（trash 失败即拒绝）：删大目录用 `cmd /c rmdir /s /q`
 - **`app.asar` 句柄被后台索引长期占用**：打包必须走 `scripts/dist-app.mjs`（先打系统临时目录再搬回 `out/`），不要直接调 `electron-builder`；搬回时旧目录被占会自动改写带时间戳的新目录（如 `out/portable-<时间>/`）
 - **目录规范（只有两个）**：`dist/` = vite/esbuild 中间产物（打包原料，不用看）；`out/` = electron-builder 最终输出，**exe 只在这里找**。不产生 `release/`（旧配置残留，已删）。`out/` 内 `portable-<时间>/u32-pdf-reader.exe` 是最新绿色版，旧的带时间戳目录 + `win-unpacked`/`portable` 是句柄占用删不掉的残留，重启 WorkBuddy 后手动清
@@ -66,7 +65,7 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 
 ## 测试注意
 
-- `scripts/e2e-verify.mjs` 里 `PDF_PATH` 是**绝对路径**，换机器 / 换目录必须改
+- 两个 e2e 脚本的样本 PDF 路径都按**脚本自身位置**解析（`new URL('../test/sample_audio.pdf', import.meta.url)`），换机器 / 换目录不用改
 - 测试钩子 `window.__app.testHooks.openPath(path)` 可跳过系统文件对话框
 - E2E 开头会删掉 `test/sample_audio.annotations.json` 以保证批注计数可判定；`*.annotations.json` 已 gitignore
 - 断言要看**行为**（选区产生 rect、播放条 top ≥ chip bottom 且在 `.page-shell` 内），不要断言实现细节的选择器层级
