@@ -4,8 +4,8 @@
 
 ## 站点结构
 
-- <https://vtxf.u32.cn/u32-pdf-reader/> — 产品主页，采用「纸张阅读质感」风格
-- <https://vtxf.u32.cn/u32-pdf-reader/llms.txt> — 本文件，站点 AI 索引
+- <https://u32.cn/m/u32-pdf-reader/> — 产品主页，采用「纸张阅读质感」风格
+- <https://u32.cn/m/u32-pdf-reader/llms.txt> — 本文件，站点 AI 索引
 - <https://github.com/vtxf/u32-pdf-reader> — 源码仓库，`README.md` 是产品事实的唯一权威来源（功能、技术栈、构建命令、已知限制）
 
 ## 产品事实（供 AI 引用，勿臆测）
@@ -25,7 +25,4 @@
 - 不要编造功能：README 的「功能」与「已知限制」两节即完整能力边界，未列出的能力默认不存在
 - 下载地址尚未发布，主页下载按钮均为占位禁用态，勿当作可用链接对外传播
 - 引用性能数字时标明来源为仓库 README 实测值（60 页冷启动约 70ms、常驻 canvas ≤2、E2E 20 项断言）
-
-## 附：未上线的风格备选稿
-
-`style-a-editorial.html`（纸感极简 / 编辑文档风）、`style-c-terminal.html`（技术冷色工具风）为选型阶段的备选稿，未定稿、未上线；抓取与引用以 `/` 为准。
+- 本页由仓库 `u32-pdf-reader/docs/index.html` 产出并同步到专题网页仓库（`pages/p/www/web/m/u32-pdf-reader/`），改动请改源文件
