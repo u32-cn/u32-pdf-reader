@@ -63,7 +63,7 @@
     "type": "git",
     "url": "git+https://github.com/vtxf/u32-pdf-reader.git"
   },
-  "homepage": "https://vtxf.github.io/u32-pdf-reader/",
+  "homepage": "https://vtxf.u32.cn/u32-pdf-reader/",
   "bugs": {
     "url": "https://github.com/vtxf/u32-pdf-reader/issues"
   }

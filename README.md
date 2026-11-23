@@ -4,7 +4,7 @@
 
 ![界面](./docs/screenshot.png)
 
-主页（GitHub Pages）：<https://vtxf.github.io/u32-pdf-reader/>
+主页（GitHub Pages）：<https://vtxf.u32.cn/u32-pdf-reader/>
 
 ## 为什么做这个阅读器
 
