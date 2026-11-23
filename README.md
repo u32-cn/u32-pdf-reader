@@ -79,7 +79,7 @@ npm run pack       # 免安装绿色版 → out/win-unpacked/
 
 | 文件 | 说明 |
 |---|---|
-| `out/u32-pdf-reader-0.1.0-setup.exe` | NSIS 安装包（约 78 MB），可选安装目录，快捷方式「u32 PDF 阅读器」 |
+| `out/u32-pdf-reader-0.2.0-setup.exe` | NSIS 安装包（约 78 MB），可选安装目录，快捷方式「u32 PDF 阅读器」 |
 | `out/win-unpacked/u32-pdf-reader.exe` | 免安装绿色版（`npm run pack` 生成；目录被占用时自动改写为 `out/portable-<时间>/`） |
 
 打包脚本是 `scripts/dist-app.mjs`，不是直接调 `electron-builder`。原因：本机工作区内的 `app.asar` 会被
@@ -88,6 +88,24 @@ npm run pack       # 免安装绿色版 → out/win-unpacked/
 
 图标由 `python scripts/make-icon.py` 生成 `build/icon.ico`（赭红底 + 纸面 + 音波，与界面同色系），已随仓库提交，
 electron-builder 打包时自动嵌入 exe 与安装包。
+
+## 发版流程
+
+分发链路：元数据走 Pages 镜像 `https://u32-pdf-reader.u32.cn/data/win/latest.yml`；安装包走 `https://u32-pdf-reader.u32.cn/download/win/<文件名>`（EdgeOne 回源 GitHub Releases）；GitHub 只作源码与资产后端，不作为常规下载入口。Pages 镜像：`https://u32-cn.github.io/u32-pdf-reader/`。
+
+1. 改 `package.json` 的 `version`，同步主页与本文档里的展示版本。
+2. 打包（必须剥离两个继承变量）：
+
+   ```bash
+   env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE npm run dist
+   ```
+
+   `NODE_OPTIONS` 挂的安全删除 shim 会拦住 electron-builder 清理旧产物；`ELECTRON_RUN_AS_NODE` 会让 electron 退化成纯 Node。
+3. 出包验证：确认 `out/u32-pdf-reader-<版本>-setup.exe` 存在、文件头两字节是 `4d5a`（MZ），并实际启动一次产物。
+4. 建 annotated tag `v<版本>` → `git push origin main --follow-tags` → `gh release create v<版本> --latest` 上传资产。资产名按规则用 `u32-pdf-reader-setup-<版本>.exe`（本地产物名次序不同，上传时重命名）。
+5. 更新 `docs/data/win/latest.yml`：`version`、`path: download/win/u32-pdf-reader-setup-<版本>.exe`、`files[0].url`、`size`、`sha256`，逐项与 Release 资产对齐；主页按钮版本号同步。
+6. 提交并 push `origin/main`，等 Pages built。
+7. 线上验收：首页 / `data/win/latest.yml` / `installation.md` / `llms.txt` 逐路径 GET 均 200；安装包 GET Range 返回 206 且 `Content-Range` 总大小与清单一致，首字节 `4d5a`，sha256 一致。通过后 `tccli teo purge` 刷 EdgeOne 缓存。
 
 ## 测试
 
