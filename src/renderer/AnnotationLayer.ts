@@ -135,8 +135,11 @@ export class AnnotationLayer extends AnnotationLayerBase {
     div.title = '双击编辑'
     div.style.left = `${x * 100}%`
     div.style.top = `${y * 100}%`
-    // 字号跟页面宽度挂钩：缩放时文字与正文同比例，不会变成一颗小字
+    // 字号跟页面宽度挂钩：缩放时文字与正文同比例，不会变成一颗小字。
+    // 页面未挂载时宽度为 0，会算出 0px 最大宽度把文字压成竖排，此时跳过
+    //（调用方在挂载后会 repaint 补画）
     const box = this._box
+    if (box.width <= 0) return
     const size = Math.max(10, Math.round(box.width * FONT_SIZE_STEPS[style.fontSize]))
     div.style.fontSize = `${size}px`
     div.style.maxWidth = `${Math.round(box.width * 0.55)}px`

@@ -184,8 +184,10 @@ export class Viewer extends ViewerBase {
         onAnnotationActivate: (rec, ev) => this._opt.onAnnotationActivate(rec, ev, pv),
         annotationMode: () => this._pdfAnnoMode,
       })
-      pv.renderAnnotations(this._opt.store.byPage(i))
+      // 先挂进 DOM 再画批注：_renderText 依赖 getBoundingClientRect()
+      // 换算字号/最大宽度，未挂载时宽度为 0，文字会被压成一字一行的竖排
       this.inner.appendChild(pv.root)
+      pv.renderAnnotations(this._opt.store.byPage(i))
       this._pages.push(pv)
       this._near.observe(pv.root)
       this._far.observe(pv.root)
