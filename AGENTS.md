@@ -77,3 +77,11 @@ node scripts/e2e-verify-packaged.mjs   # 打包版 E2E：端口 9223
 - `test/sample_audio.pdf`、`test/sample_audio.wav` 是**入库样本**，用 `scripts/make-sample.mjs` 重新生成，不要手工塞二进制
 - `build/icon.ico` 必须入库（electron-builder 打包依赖它），`build/icon.png` 是生成源
 - 设计决策与历史坑的详细记录在 `.workbuddy/memory/`（不入库），长期有效的结论要回写到这里
+
+## 主页发布（AI 必读）
+
+- 正式站点：<https://u32.cn/m/u32-pdf-reader/>，由**专题网页仓库** `ai-pages-2026` 发布，**不用 GitHub Pages**（已关闭，别再加 `docs/.nojekyll`）
+- 发布位置：`$VTXF_AI_PAGES_DIR/pages/p/www/web/m/u32-pdf-reader/`（index.html + screenshot.png + llms.txt，三者需与 `docs/` 下的源文件一致）
+- 改主页的流程：改 `docs/index.html` → 复制到上述目录 → 用 OSS 上传 → `node scripts/purge-cache.js path "/m/u32-pdf-reader/"` 刷 EdgeOne 缓存
+- `pages/p/www/web/m/` 映射 `https://u32.cn/m/<应用名>/`，不占子域；`llms.txt` 的 ai-llms-hint 绝对地址必须是 `https://u32.cn/m/u32-pdf-reader/llms.txt?aihit=...`
+- **本机 `OSS_ACCESS_KEY_ID`/`OSS_ACCESS_KEY_SECRET` 环境变量里的 AK 已失效**（InvalidAccessKeyId）。可用的临时方案：`~/.aliyun/config.json` 里的 `oauth` profile（STS，约数小时过期），用 `oss cp ... --access-key-id <STS> --access-key-secret <SK> --sts-token <Token>` 上传
