@@ -4,7 +4,7 @@
 
 ![界面](./docs/screenshot.png)
 
-主页：<https://u32.cn/m/u32-pdf-reader/>（源文件 `docs/index.html`，发布到专题网页仓库 `ai-pages-2026`）
+主页：<https://u32-cn.github.io/u32-pdf-reader/>（源文件 `docs/index.html`，发布到专题网页仓库 `ai-pages-2026`）
 
 ## 为什么做这个阅读器
 

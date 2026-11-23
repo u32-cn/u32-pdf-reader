@@ -4,8 +4,8 @@
 
 ## 站点结构
 
-- <https://u32.cn/m/u32-pdf-reader/> — 产品主页，采用「纸张阅读质感」风格
-- <https://u32.cn/m/u32-pdf-reader/llms.txt> — 本文件，站点 AI 索引
+- <https://u32-cn.github.io/u32-pdf-reader/> — 产品主页，采用「纸张阅读质感」风格
+- <https://u32-cn.github.io/u32-pdf-reader/llms.txt> — 本文件，站点 AI 索引
 - <https://github.com/vtxf/u32-pdf-reader> — 源码仓库，`README.md` 是产品事实的唯一权威来源（功能、技术栈、构建命令、已知限制）
 
 ## 产品事实（供 AI 引用，勿臆测）
