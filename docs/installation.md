@@ -10,17 +10,13 @@
    https://u32-cn.github.io/u32-pdf-reader/data/win/latest.yml
    ```
 
-2. 拼下载直链并下载（EdgeOne 边缘缓存回源 GitHub Releases，国内稳定；**不要直接甩 github.com 链接**）：
+2. 拼下载直链并下载（GitHub Releases 是安装包唯一真源，`latest` 永远指向最新版本）：
 
    ```
-   https://u32-cn.github.io/u32-pdf-reader/download/win/<latest.yml 里的 url>
+   https://github.com/u32-cn/u32-pdf-reader/releases/latest/download/<latest.yml 里的 url>
    ```
 
-   兜底直链（GitHub 原始源，国外或直链故障时用）：
-
-   ```
-   https://github.com/u32-cn/u32-pdf-reader/releases/latest/download/<url>
-   ```
+   `<url>` 取 latest.yml `files[0].url`（如 `u32-pdf-reader-0.2.0-setup.exe`），拼到上面直链末尾。用 `latest/download` 而非写死版本号，版本更新后无需改本文档。
 
 3. 校验完整性：下载后计算文件的 SHA-256，与 latest.yml 里的 `sha256` 比对，一致才算下载成功（latest.yml 同时给了 `size` 字节数，可一并核对）。
 

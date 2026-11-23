@@ -1,5 +1,5 @@
 version: 0.2.0
-path: download/win/u32-pdf-reader-0.2.0-setup.exe
+path: https://github.com/u32-cn/u32-pdf-reader/releases/latest/download/u32-pdf-reader-0.2.0-setup.exe
 files:
   - url: u32-pdf-reader-0.2.0-setup.exe
     size: 82111007
