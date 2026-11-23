@@ -4,6 +4,8 @@
 
 ![界面](./docs/screenshot.png)
 
+主页（GitHub Pages）：<https://vtxf.github.io/u32-pdf-reader/>
+
 ## 为什么做这个阅读器
 
 作者常给小孩看英文自然拼读（Phonics）类的 PDF 绘本，其中不少 PDF 自带朗读音频。但实测下来，除了 Adobe 家的阅读器，其他几乎所有工具都播不出声音——福昕、各类小众 PDF 阅读器，甚至浏览器内置的 PDF 查看器，都不支持。
@@ -11,6 +13,11 @@
 这个功能明明很有用，却一直缺一个轻量的实现。过去没有 AI，独立开发成本太高；现在条件成熟了，就动手做了这一个。
 
 我不想用 Adobe，原因很简单：安装包太大、UI 太复杂。我需要的只是一个**能看、能简单批注、能播放内嵌音频**的小型 PDF 阅读器——于是就有了它。希望这个工具对你也有帮助。
+
+两点说明：
+
+- 音频播放条带进度条，可以**拖拽控制播放进度**，不用从头听
+- UI 说不上好看，但**功能是真的能用**；界面以后有机会再改进，先用起来要紧
 
 ## 功能
 
@@ -49,7 +56,7 @@
 
 ## 技术栈
 
-Electron 33 + TypeScript 5.7（`strict`）+ 原生 DOM（无框架）+ Vite 6 + pdfjs-dist 4.10 + [@vtxfp/vtxf-basic-tools-202607](https://codeup.aliyun.com/vtxf/2026/vtxf-basic-tools-202607)（`Destroyable` / `react` / `watch`）
+Electron 33 + TypeScript 5.7（`strict`）+ 原生 DOM（无框架）+ Vite 6 + pdfjs-dist 4.10 + @vtxfp/vtxf-basic-tools-202607（私有包，`Destroyable` / `react` / `watch`）
 
 运行环境：Windows 10/11 x64。
 
@@ -65,6 +72,8 @@ npm run pack       # 免安装绿色版 → out/win-unpacked/
 ```
 
 > Windows 本机若全局有 `ELECTRON_RUN_AS_NODE=1`，启动前必须 `unset`，否则 electron 会退化成纯 Node 进程。
+
+> 依赖里的 `@vtxfp/vtxf-basic-tools-202607` 是内部私有包（不在公共 npm 上），所以从公开仓库克隆后 `npm install` 拉不全、无法完整构建；仓库只提供 `.npmrc.example` 占位，不携带私服地址。看源码、用成品不受影响。
 
 ## 打包产物
 
